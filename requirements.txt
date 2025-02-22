@@ -1,0 +1,14 @@
+# Core Dependencies
+playwright==1.42.0          # Browser automation for test execution
+autogen==0.4.0              # AI agent-based test generation
+python-dotenv==1.0.0        # Managing environment variables
+openai==1.12.0              # OpenAI's Python SDK
+
+# Optional Dependencies (for best practices & testing)
+pytest==8.1.1               # Run Playwright tests with pytest
+pytest-asyncio==0.23.6      # Support for async Playwright tests
+pytest-playwright==0.4.2    # Pytest integration for Playwright
+
+# Code Quality Tools (Optional but Recommended)
+black==24.3.0               # Auto-format Python code
+flake8==7.0.0               # Linter for checking Python syntax
