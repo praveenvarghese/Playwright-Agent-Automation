@@ -3,6 +3,7 @@ playwright==1.42.0          # Browser automation for test execution
 autogen==0.4.0              # AI agent-based test generation
 python-dotenv==1.0.0        # Managing environment variables
 openai==1.12.0              # OpenAI's Python SDK
+browser-use==0.1.39         # Browser configuration dependency
 
 # Optional Dependencies (for best practices & testing)
 pytest==8.1.1               # Run Playwright tests with pytest
