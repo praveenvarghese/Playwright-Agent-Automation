@@ -1,11 +1,11 @@
 import asyncio
 import os
-from config import TestCaseAgent, TestCaseCritic
-from token_monitoring import token_monitor
+from config.config import TestCaseAgent, TestCaseCritic
+from monitoring.token_monitor import token_monitor
 
 TEST_CASES_FILE = "TestCases.txt"
-GENERATOR_PROMPT_FILE = "test-case-generator-prompt.txt"
-CRITIC_PROMPT_FILE = "test-case-critic-prompt.txt"
+GENERATOR_PROMPT_FILE = "prompts/generator_prompt.txt"
+CRITIC_PROMPT_FILE = "prompts/critic_prompt.txt"
 RAW_GENERATOR_RESPONSE_FILE = "RawGeneratorResponse.txt"
 RAW_CRITIC_RESPONSE_FILE = "RawCriticResponse.txt"
 

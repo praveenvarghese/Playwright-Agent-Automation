@@ -1,11 +1,13 @@
 import asyncio
+from src.utils.logger import setup_logging, success, progress, warning, error
+
 import os
 import json
-from test_case_generator import generate_test_cases
-from vector_retrieval import VectorRetrievalSystem
-from generate_embeddings import EmbeddingsGenerator
+from src.test_cases.generator import generate_test_cases
+from src.vector_search.retrieval import VectorRetrievalSystem
+from src.vector_search.embeddings import EmbeddingsGenerator
 from datetime import datetime
-from token_monitoring import token_monitor
+from monitoring.token_monitor import token_monitor
 
 # File paths for saving test cases (for reference only)
 RAW_OPENAI_RESPONSE_FILE = "RawOpenAIResponse.txt"
@@ -13,6 +15,10 @@ FINAL_TEST_CASES_FILE = "TestCases.txt"
 PROCESSED_TEST_CASES_FILE = "ProcessedTestCases.txt"
 
 async def main():
+    # Initialize logging
+    loggers = setup_logging()
+    logger = loggers['main']
+
     """
     Enhanced workflow with direct database upload:
     1. Retrieve similar test cases (if any exist)
@@ -29,7 +35,7 @@ async def main():
     
     # Read requirement from the prompt file
     try:
-        with open("test-case-generator-prompt.txt", "r", encoding="utf-8") as f:
+        with open("prompts/generator_prompt.txt", "r", encoding="utf-8") as f:
             requirement_text = f.read()
     except FileNotFoundError as e:
         print(f"Error: Prompt file not found - {e}")
@@ -40,7 +46,7 @@ async def main():
     similar_cases = await vector_system.retrieve_similar_test_cases(requirement_text)
     
     if similar_cases and len(similar_cases) > 0:
-        print(f"🔹 Found {len(similar_cases)} similar test cases to use as reference.")
+        logger.info(progress('Found {len(similar_cases)} similar test cases to use as reference.'))
         # Print the titles of similar test cases for reference
         for i, case in enumerate(similar_cases):
             print(f"  {i+1}. {case.get('title', 'Unknown')}")
@@ -53,7 +59,7 @@ async def main():
     
     # Save OpenAI response to files for reference
     if test_cases_content:
-        print(f"🔹 Saving generated test cases to reference files")
+        logger.info(progress('Saving generated test cases to reference files'))
         
         # Save raw response
         with open(RAW_OPENAI_RESPONSE_FILE, "w", encoding="utf-8") as f:
@@ -85,7 +91,7 @@ async def main():
         if current_section:
             test_case_sections.append(current_section)
         
-        print(f"🔹 Found {len(test_case_sections)} test cases in the generated content")
+        logger.info(progress('Found {len(test_case_sections)} test cases in the generated content'))
         
         # Process and upload each test case
         stored_count = 0
@@ -117,12 +123,12 @@ async def main():
                 else:
                     print(f"  Failed to parse a valid ID for test case {i+1}")
         
-        print(f"🔹 Successfully stored {stored_count} test cases in the vector database.")
+        logger.info(progress('Successfully stored {stored_count} test cases in the vector database.'))
         
         # Log the processed test cases to a separate file
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         log_file = f"test_cases_log_{timestamp}.txt"
-        print(f"🔹 Saving processed test cases details to {log_file}")
+        logger.info(progress('Saving processed test cases details to {log_file}'))
         
         with open(log_file, "w", encoding="utf-8") as f:
             f.write(f"PROCESSED TEST CASES - {datetime.now().isoformat()}\n\n")
@@ -137,7 +143,7 @@ async def main():
         # Generate and save cost report
         cost_report = token_monitor.get_usage_report()
         cost_report_file = f"token_usage_report_{timestamp}.json"
-        print(f"🔹 Saving token usage report to {cost_report_file}")
+        logger.info(progress('Saving token usage report to {cost_report_file}'))
         
         with open(cost_report_file, "w", encoding="utf-8") as f:
             json.dump(cost_report, f, indent=2)

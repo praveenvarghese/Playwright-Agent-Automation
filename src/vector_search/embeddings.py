@@ -6,7 +6,7 @@ import requests
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorQuery
 from azure.core.credentials import AzureKeyCredential
-from token_monitoring import token_monitor
+from monitoring.token_monitor import token_monitor
 
 class EmbeddingsGenerator:
     def __init__(self):
@@ -293,5 +293,5 @@ if __name__ == "__main__":
         print(f"ID: {case['id']}, Title: {case['title']}")
     
     # Print token usage report
-    from token_monitoring import token_monitor
+    from monitoring.token_monitor import token_monitor
     token_monitor.print_usage_report()
