@@ -1,13 +1,23 @@
 import asyncio
 import os
 from config.config import TestCaseAgent, TestCaseCritic
-from monitoring.token_monitor import token_monitor
 
-TEST_CASES_FILE = "TestCases.txt"
-GENERATOR_PROMPT_FILE = "prompts/generator_prompt.txt"
-CRITIC_PROMPT_FILE = "prompts/critic_prompt.txt"
-RAW_GENERATOR_RESPONSE_FILE = "RawGeneratorResponse.txt"
-RAW_CRITIC_RESPONSE_FILE = "RawCriticResponse.txt"
+# Define paths using project structure
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
+PROMPTS_DIR = os.path.join(PROJECT_ROOT, "prompts")
+
+# Make sure directories exist
+for directory in [LOGS_DIR, OUTPUT_DIR]:
+    os.makedirs(directory, exist_ok=True)
+
+# File paths for saving test cases
+TEST_CASES_FILE = os.path.join(OUTPUT_DIR, "TestCases.txt")
+GENERATOR_PROMPT_FILE = os.path.join(PROMPTS_DIR, "generator_prompt.txt")
+CRITIC_PROMPT_FILE = os.path.join(PROMPTS_DIR, "critic_prompt.txt")
+RAW_GENERATOR_RESPONSE_FILE = os.path.join(LOGS_DIR, "RawGeneratorResponse.txt")
+RAW_CRITIC_RESPONSE_FILE = os.path.join(LOGS_DIR, "RawCriticResponse.txt")
 
 async def generate_test_cases(similar_cases=None):
     """
@@ -36,7 +46,7 @@ async def generate_test_cases(similar_cases=None):
         with open(CRITIC_PROMPT_FILE, "r", encoding="utf-8") as f:
             critic_prompt = f.read()
     except FileNotFoundError as e:
-        print(f"Error: Prompt file not found - {e}")
+        print(f"❌ Error: Prompt file not found - {e}")
         return None
     
     # Step 2: Prepare context with similar test cases
@@ -56,22 +66,11 @@ async def generate_test_cases(similar_cases=None):
     if context:
         enhanced_prompt += "\n\nPlease use the reference test cases as examples for format and completeness, but create new test cases specific to the requirements above."
     
-    # Track token usage for the generator prompt
-    prompt_tokens = token_monitor.get_token_count(enhanced_prompt)
-    print(f"Generator prompt tokens: {prompt_tokens}")
-    
-    # Generate test cases
+    # Generate test cases (no token tracking)
     test_cases = await TestCaseAgent.a_generate_reply(
         messages=[{"role": "user", "content": enhanced_prompt}]
     )
     test_cases_content = test_cases  # Store the generated content
-    
-    # Track completion token usage
-    completion_tokens = token_monitor.get_token_count(test_cases_content)
-    print(f"Generator completion tokens: {completion_tokens}")
-    
-    # Log usage for monitoring
-    token_monitor.log_completion_usage(prompt_tokens, completion_tokens)
     
     # Step 4: Save raw generator response
     with open(RAW_GENERATOR_RESPONSE_FILE, "w", encoding="utf-8") as f:
@@ -89,23 +88,12 @@ async def generate_test_cases(similar_cases=None):
     {test_cases_content}
     """
     
-    # Track token usage for the critic prompt
-    critic_prompt_tokens = token_monitor.get_token_count(critic_task)
-    print(f"Critic prompt tokens: {critic_prompt_tokens}")
-    
-    # Get critic review
+    # Get critic review (no token tracking)
     reviewed_test_cases = await TestCaseCritic.a_generate_reply(
         messages=[{"role": "user", "content": critic_task}]
     )
     
     final_test_cases_content = reviewed_test_cases  # Store the final version
-    
-    # Track completion token usage for critic
-    critic_completion_tokens = token_monitor.get_token_count(final_test_cases_content)
-    print(f"Critic completion tokens: {critic_completion_tokens}")
-    
-    # Log usage for monitoring
-    token_monitor.log_completion_usage(critic_prompt_tokens, critic_completion_tokens)
     
     # Step 6: Save raw critic response
     with open(RAW_CRITIC_RESPONSE_FILE, "w", encoding="utf-8") as f:
@@ -117,9 +105,6 @@ async def generate_test_cases(similar_cases=None):
         f.write(final_test_cases_content)
     
     print(f"Finalized test cases saved to {TEST_CASES_FILE}")
-    
-    # Print token usage report
-    token_monitor.print_usage_report()
     
     return final_test_cases_content
 

@@ -6,7 +6,6 @@ import requests
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorQuery
 from azure.core.credentials import AzureKeyCredential
-from monitoring.token_monitor import token_monitor
 
 class EmbeddingsGenerator:
     def __init__(self):
@@ -87,9 +86,6 @@ class EmbeddingsGenerator:
         retry_count = 0
         max_retries = 3
         
-        # Estimate token count for monitoring
-        token_count = token_monitor.get_token_count(text, self.azure_embedding_model)
-        
         start_time = time.time()
         while retry_count < max_retries:
             try:
@@ -97,19 +93,6 @@ class EmbeddingsGenerator:
                 response.raise_for_status()
                 embedding_data = response.json()
                 embedding = embedding_data["data"][0]["embedding"]
-                
-                # Log token usage for monitoring
-                # If the response includes token count, use that instead of our estimate
-                actual_tokens = token_count
-                if "usage" in embedding_data and "total_tokens" in embedding_data["usage"]:
-                    actual_tokens = embedding_data["usage"]["total_tokens"]
-                
-                # Log the embedding API call for monitoring
-                token_monitor.log_embedding_usage(
-                    text_length=len(text),
-                    token_count=actual_tokens,
-                    model=self.azure_embedding_model
-                )
                 
                 return embedding
             except Exception as e:
@@ -234,38 +217,35 @@ class EmbeddingsGenerator:
             return False
     
     def search_similar_test_cases(self, query_text, top=3):
-   
-      try:
-        # Generate query embedding
-        query_embedding = self.generate_embedding(query_text)
-        if not query_embedding:
-            print("Failed to generate embedding for query")
+        try:
+            # Generate query embedding
+            query_embedding = self.generate_embedding(query_text)
+            if not query_embedding:
+                print("Failed to generate embedding for query")
+                return []
+
+            # Correct vector search payload with required 'kind' parameter
+            vector_query = VectorQuery(
+                vector=query_embedding,
+                fields="vector",
+                k=top,
+                kind="vector"
+            )
+
+            # Perform search with the correct parameter
+            results = self.search_client.search(
+                search_text=None,
+                vector_queries=[vector_query],
+                top=top,
+                select=["id", "title", "steps", "expectedResults"]
+            )
+
+            similar_cases = [doc for doc in results]
+            return similar_cases
+
+        except Exception as e:
+            print(f"Error performing vector search: {str(e)}")
             return []
-
-        # Correct vector search payload with required 'kind' parameter
-        vector_query = [
-            {
-                "vector": query_embedding,  # Embedding data
-                "fields": "vector",  # Field in the index to search
-                "k": top,  # Number of results
-                "kind": "vector"  # REQUIRED for Azure vector search
-            }
-        ]
-
-        # Perform search with the correct parameter
-        results = self.search_client.search(
-            search_text=None,
-            vector_queries=vector_query,  # Correct parameter
-            top=top,
-            select=["id", "title", "steps", "expectedResults"]
-        )
-
-        similar_cases = [doc for doc in results]
-        return similar_cases
-
-      except Exception as e:
-        print(f"Error performing vector search: {str(e)}")
-        return []
 
 
 # Example usage - only runs if script is executed directly
@@ -291,7 +271,3 @@ if __name__ == "__main__":
     print(f"Found {len(similar)} similar test cases")
     for case in similar:
         print(f"ID: {case['id']}, Title: {case['title']}")
-    
-    # Print token usage report
-    from monitoring.token_monitor import token_monitor
-    token_monitor.print_usage_report()
