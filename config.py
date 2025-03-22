@@ -6,7 +6,11 @@ import autogen
 
 # Load environment variables
 load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
+
+azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+azure_base_url = os.getenv("AZURE_OPENAI_ENDPOINT")  # Extract the base part of the URL
+azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION")  # API version from your URL
+azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")  # Deployment name from your URL
 
 # Configure browser settings
 browser_config = BrowserConfig(
@@ -27,11 +31,14 @@ context_config = BrowserContextConfig(
 browser = Browser(config=browser_config)
 context = BrowserContext(browser=browser, config=context_config)
 
-# 🎯 LLM Configuration for AutoGen
+#LLM Configuration for AutoGen with Azure OpenAI
 config_list = [
     {
-        "model": "gpt-4o-mini",
-        "api_key": api_key,
+        "model": azure_deployment,  # Use the deployment name instead of model name
+        "api_key": azure_api_key,
+        "api_version": azure_api_version,  # Include API version for Azure
+        "base_url": azure_base_url,  # Use the Azure base URL
+        "api_type": "azure",  # Specify that we're using Azure OpenAI
     }
 ]
 

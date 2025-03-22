@@ -1,0 +1,73 @@
+Here is a revised version of the test cases, ensuring they contain the required fields and meet the specified criteria:
+
+### Revised Test Cases
+
+### Test Case 1
+1. **Test Case ID:** TC-ENV-001
+2. **Title:** Create a Native Environment
+3. **Steps:**
+   1. Navigate to the "Create Environment" page.
+   2. Enter a name for the environment.
+   3. Leave the "Linked environment URL" field empty.
+   4. Click the "Create" button.
+   5. Check the environment list to verify the new environment.
+4. **Expected Results:** The new Native environment appears in the environment list with the proper name and "Native" tag displayed.
+
+### Test Case 2
+1. **Test Case ID:** TC-ENV-002
+2. **Title:** Create a Linked Environment
+3. **Steps:**
+   1. Navigate to the "Create Environment" page.
+   2. Enter a name for the environment.
+   3. Fill in the "Linked environment URL" field with a valid URL.
+   4. Click the "Create" button.
+   5. Check the environment list to verify the new environment.
+4. **Expected Results:** The new Linked environment appears in the environment list with the proper name and "Linked" tag displayed.
+
+### Test Case 3
+1. **Test Case ID:** TC-ENV-003
+2. **Title:** Edit an Existing Environment
+3. **Steps:**
+   1. Select an existing environment from the environment list.
+   2. Click on the "Edit" button.
+   3. Change the name of the environment.
+   4. Click the "Save" button.
+   5. Check the environment list to verify the changes.
+4. **Expected Results:** The edited environment's name is updated and displayed correctly in the environment list.
+
+### Test Case 4
+1. **Test Case ID:** TC-ENV-004
+2. **Title:** Delete an Environment
+3. **Steps:**
+   1. Select an environment from the environment list.
+   2. Click on the "Delete" button.
+   3. Confirm the deletion in the confirmation dialog.
+   4. Check if the environment has been removed from the list.
+   5. Verify the environment list updates accordingly.
+4. **Expected Results:** The environment is removed from the list and no longer displayed.
+
+### Test Case 5
+1. **Test Case ID:** TC-ENV-005
+2. **Title:** Set Default Environment
+3. **Steps:**
+   1. Select an existing environment from the environment list.
+   2. Click on the "Set as Default" button.
+   3. Verify the default status is applied.
+   4. Observe the display of the default environment.
+   5. Refresh the environment list to ensure changes are reflected.
+4. **Expected Results:** The selected environment is marked as the default, observable in the environment list.
+
+### Test Case 6
+1. **Test Case ID:** TC-ENV-006
+2. **Title:** Delete Default Environment
+3. **Steps:**
+   1. Identify the default environment in the environment list.
+   2. Click on the "Delete" button.
+   3. Confirm deletion in the confirmation dialog.
+   4. Check the environment list for default status change.
+   5. Verify that the ROOT environment is now set as the default.
+4. **Expected Results:** The default environment is removed, and the ROOT environment is set as the new default.
+
+These revisions have ensured that the test cases are clear, concise, and conform to the required structure while focusing on essential functionalities. 
+
+TERMINATE

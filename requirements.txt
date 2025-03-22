@@ -1,15 +1,24 @@
 # Core Dependencies
-playwright==1.50.0          # Browser automation for test execution
-autogen==0.4.0              # AI agent-based test generation
-python-dotenv==1.0.1        # Managing environment variables
-openai==1.58.1              # OpenAI's Python SDK (Updated)
-browser-use==0.1.39         # Browser configuration dependency
+playwright==1.50.0
+autogen==0.4.0
+python-dotenv==1.0.1
+openai==1.58.1
+browser-use==0.1.39
+flaml[automl]
+# Azure SDK
+azure-search-documents==11.5.2
+azure-core==1.29.5
 
-# Optional Dependencies (for best practices & testing)
-pytest==7.4.3              # Run Playwright tests with pytest
-pytest-asyncio==0.23.6      # Support for async Playwright tests
-pytest-playwright==0.7.0    # Pytest integration for Playwright
+# Token Monitoring Dependencies
+tiktoken==0.5.1        # For token counting
+matplotlib==3.8.0      # For report visualization
+requests==2.31.0       # For API calls
 
-# Code Quality Tools (Optional but Recommended)
-black==24.3.0               # Auto-format Python code
-flake8==7.0.0               # Linter for checking Python syntax
+# Optional Dependencies
+pytest==7.4.3
+pytest-asyncio==0.23.6
+pytest-playwright==0.7.0
+
+# Code Quality Tools
+black==24.3.0
+flake8==7.0.0
