@@ -5,6 +5,7 @@ from datetime import datetime
 from src.test_cases.generator import generate_test_cases
 from src.vector_search.retrieval import VectorRetrievalSystem
 from src.vector_search.embeddings import EmbeddingsGenerator
+from src.vector_search.feature_processor import FeatureProcessor
 
 # Define constants for all path references
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -21,6 +22,37 @@ def print_progress(message): print(f"🔹 {message}")
 def print_success(message): print(f"✅ {message}")
 def print_warning(message): print(f"⚠️ {message}")
 def print_error(message): print(f"❌ {message}")
+
+async def read_feature_requirement():
+    """Read and process the feature requirement from the prompt file."""
+    try:
+        # Path to the feature requirement file
+        feature_file = os.path.join(PROMPTS_DIR, "feature_requirement.txt")
+        
+        # Initialize the feature processor
+        feature_processor = FeatureProcessor()
+        
+        # Check if file exists
+        if not os.path.exists(feature_file):
+            print_error(f"Error: Feature requirement file not found at {feature_file}")
+            return None
+            
+        # Process the feature requirement
+        processed_feature = feature_processor.process_and_store_feature_file(feature_file)
+        
+        if processed_feature:
+            print_success(f"Successfully processed feature: {processed_feature['id']}")
+            return processed_feature
+        else:
+            print_error("Failed to process feature requirement")
+            return None
+            
+    except FileNotFoundError as e:
+        print_error(f"Error: Feature requirement file not found - {e}")
+        return None
+    except Exception as e:
+        print_error(f"Error processing feature requirement: {str(e)}")
+        return None
 
 async def read_requirement():
     """Read the test case requirement from the prompt file."""
@@ -67,7 +99,7 @@ async def create_test_cases(similar_cases):
     
     return test_cases_content
 
-async def process_and_store_test_cases(test_cases_content):
+async def process_and_store_test_cases(test_cases_content, feature_data=None):
     """Process the generated test cases and store them in the database."""
     print_progress("Processing and uploading test cases...")
     
@@ -76,7 +108,7 @@ async def process_and_store_test_cases(test_cases_content):
     current_section = ""
     
     for line in test_cases_content.split('\n'):
-        if ("Test Case ID:" in line or "ID: TC-ENV" in line) and current_section:
+        if ("Test Case ID:" in line or "ID:" in line) and current_section:
             test_case_sections.append(current_section)
             current_section = line + "\n"
         else:
@@ -91,6 +123,7 @@ async def process_and_store_test_cases(test_cases_content):
     embeddings_generator = EmbeddingsGenerator()
     stored_count = 0
     processed_test_cases = []
+    test_case_ids = []  # Store test case IDs to update feature
     
     for i, test_case_text in enumerate(test_case_sections, 1):  # Start index from 1
         if not test_case_text.strip():
@@ -103,10 +136,18 @@ async def process_and_store_test_cases(test_cases_content):
             print(f"  ID: {parsed_case.get('id')}")
             print(f"  Title: {parsed_case.get('title', '')}")
             
+            # Add feature metadata if available
+            if feature_data:
+                parsed_case["featureMetadata"] = {
+                    "featureId": feature_data["id"],
+                    "lastUpdated": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+                }
+            
             success = embeddings_generator.upload_test_case(parsed_case)
             if success:
                 stored_count += 1
                 processed_test_cases.append(parsed_case)
+                test_case_ids.append(parsed_case.get("id"))
                 print_success(f"  Successfully uploaded test case {i}")
             else:
                 print_warning(f"  Failed to upload test case {i}")
@@ -114,6 +155,16 @@ async def process_and_store_test_cases(test_cases_content):
             print_error(f"  Failed to parse a valid ID for test case {i}")
     
     print_success(f"Successfully stored {stored_count} test cases in the vector database.")
+    
+    # Update feature with test case IDs if feature data is available and test cases were stored
+    if feature_data and test_case_ids:
+        feature_processor = FeatureProcessor()
+        update_success = feature_processor.update_feature_test_cases(feature_data["id"], test_case_ids)
+        
+        if update_success:
+            print_success(f"Successfully linked {len(test_case_ids)} test cases to feature {feature_data['id']}")
+        else:
+            print_warning(f"Failed to link test cases to feature {feature_data['id']}")
     
     # Save processed test cases to log file
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -127,4 +178,6 @@ async def process_and_store_test_cases(test_cases_content):
             f.write(f"Title: {case.get('title', 'Unknown')}\n")
             f.write(f"Steps:\n{case.get('steps', 'None')}\n")
             f.write(f"Expected Results:\n{case.get('expectedResults', 'None')}\n")
+            if case.get("featureMetadata"):
+                f.write(f"Feature ID: {case.get('featureMetadata', {}).get('featureId', 'None')}\n")
             f.write("\n---\n\n")

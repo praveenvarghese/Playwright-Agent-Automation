@@ -139,7 +139,9 @@ class EmbeddingsGenerator:
             elif "Test Case Title:" in line or "Title:" in line:
                 parts = line.split(":", 1)
                 if len(parts) > 1:
-                    test_case["title"] = parts[1].strip()
+                    raw_title = parts[1].strip()
+                    clean_title = raw_title.replace('*', '').strip()
+                    test_case["title"] = clean_title
             elif "Test Steps:" in line or "Steps:" in line:
                 current_section = "steps"
                 test_case["steps"] = ""
@@ -189,7 +191,7 @@ class EmbeddingsGenerator:
             
             # Ensure createdDate exists
             if not test_case.get("createdDate"):
-                test_case["createdDate"] = datetime.now(timezone.utc).isoformat()
+                test_case["createdDate"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             
             # Extract content to generate embedding
             content_for_embedding = f"{test_case.get('title', '')} {test_case.get('steps', '')} {test_case.get('expectedResults', '')}"
@@ -228,7 +230,6 @@ class EmbeddingsGenerator:
             vector_query = VectorQuery(
                 vector=query_embedding,
                 fields="vector",
-                k=top,
                 kind="vector"
             )
 
