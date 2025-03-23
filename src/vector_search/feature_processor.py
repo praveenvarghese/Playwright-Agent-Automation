@@ -418,16 +418,7 @@ class FeatureProcessor:
 
     def update_feature_with_criteria(self, feature_id, feature_data, updated_criteria, preserve_test_cases=True):
         """
-        Update a feature with new criteria while preserving test case links.
-        
-        Args:
-            feature_id (str): The feature ID to update
-            feature_data (dict): The new feature data
-            updated_criteria (list): List of updated criteria objects
-            preserve_test_cases (bool): Whether to preserve existing test case links
-            
-        Returns:
-            bool: True if successful, False otherwise
+        Update a feature with new criteria while preserving test case links and deprecated criteria.
         """
         try:
             # Get existing test case IDs if preserving
@@ -435,20 +426,11 @@ class FeatureProcessor:
             if preserve_test_cases:
                 existing_test_case_ids = self.get_existing_test_case_ids(feature_id)
             
-            # Ensure criteria objects only contain fields in your schema
-            # This prevents errors about unknown fields
-            sanitized_criteria = []
-            for criteria in updated_criteria:
-                # Only include fields that are known to exist in your schema
-                sanitized = {
-                    "id": criteria.get("id", ""),
-                    "description": criteria.get("description", ""),
-                    "status": criteria.get("status", "Active"),
-                    "addedDate": criteria.get("addedDate", datetime.now(timezone.utc).isoformat())
-                }
-                sanitized_criteria.append(sanitized)
-            
-            # Prepare document for Cognitive Search
+            # Debug logging
+            deprecated_count = sum(1 for c in updated_criteria if c.get('status') == 'Deprecated')
+            print(f"🔹 Updating feature {feature_id} with {len(updated_criteria)} criteria objects, including {deprecated_count} deprecated")
+                
+            # Prepare document for Cognitive Search - include ALL criteria
             search_doc = {
                 "id": feature_id,
                 "name": feature_data.get('title', ''),
@@ -457,20 +439,31 @@ class FeatureProcessor:
                 "version": str(self.registry['features'][feature_data['title']]['latest_version']),
                 "createdDate": self.registry['features'][feature_data['title']]['created'],
                 "lastUpdated": datetime.now(timezone.utc).isoformat(),
-                "acceptanceCriteria": sanitized_criteria,
+                "acceptanceCriteria": updated_criteria,  # Include ALL criteria, including deprecated
                 "testCaseIds": existing_test_case_ids
             }
             
-            # Upload to Azure Cognitive Search
-            self.search_client.upload_documents(documents=[search_doc])
-            print(f"Successfully updated feature: {feature_id}")
+            # Extra verification to ensure deprecated criteria are included
+            for i, criteria in enumerate(updated_criteria):
+                if criteria.get('status') == 'Deprecated':
+                    print(f"🔹 Including deprecated criteria in position {i}: {criteria.get('id')}")
             
-            return True
-        
+            # Upload to Azure Cognitive Search
+            try:
+                self.search_client.upload_documents(documents=[search_doc])
+                print(f"✅ Successfully updated feature: {feature_id} with {len(updated_criteria)} criteria")
+                
+                # Verify update was successful
+                # This would fetch the document again to confirm deprecated criteria were stored
+                return True
+            except Exception as e:
+                print(f"⚠️ Error during database update: {str(e)}")
+                return False
+                
         except Exception as e:
-            print(f"Error updating feature: {str(e)}")
+            print(f"⚠️ Error updating feature: {str(e)}")
             return False
-
+    
     def get_existing_test_case_ids(self, feature_id):
         """
         Get existing test case IDs for a feature.
