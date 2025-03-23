@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 import requests
 from azure.search.documents import SearchClient
+from azure.search.documents._generated.models import VectorQuery as GeneratedVectorQuery
 from azure.search.documents.models import VectorQuery
 from azure.core.credentials import AzureKeyCredential
 
@@ -104,7 +105,7 @@ class EmbeddingsGenerator:
                     print("Max retries reached. Failed to generate embedding.")
                     return None
     
-    def parse_test_case_from_text(self, text):
+    
         """
         Parse a test case from generated text output.
         Simplified to extract only ID, Title, Steps, and Expected Results.
@@ -218,6 +219,94 @@ class EmbeddingsGenerator:
             print(f"Unexpected error in upload_test_case: {str(e)}")
             return False
     
+    def parse_test_case_from_text(self, text):
+        """
+        Parse a test case from generated text output.
+        Updated to handle Markdown formatting with asterisks.
+        
+        Args:
+            text (str): The generated test case text
+            
+        Returns:
+            dict: Structured test case
+        """
+        # Simple parsing based on simplified format
+        lines = text.strip().split('\n')
+        test_case = {
+            "id": "",
+            "title": "",
+            "steps": "",
+            "expectedResults": "",
+            "createdDate": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # Ensure this is always set
+        }
+        
+        current_section = None
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Remove Markdown bold formatting (** **)
+            line = line.replace('**', '')
+            
+            # Check for headers - with or without asterisks
+            if "Test Case ID:" in line or "ID:" in line:
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    # Clean ID value - remove any invalid characters
+                    raw_id = parts[1].strip()
+                    # Remove any remaining asterisks and other invalid characters
+                    clean_id = ''.join(c for c in raw_id if c.isalnum() or c in ['-', '_', '='])
+                    test_case["id"] = clean_id
+            elif "Test Case Title:" in line or "Title:" in line:
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    test_case["title"] = parts[1].strip()
+            elif "Test Steps:" in line or "Steps:" in line:
+                current_section = "steps"
+                test_case["steps"] = ""
+            elif "Expected Results:" in line or "Expected Result:" in line:
+                current_section = "expectedResults"
+                test_case["expectedResults"] = ""
+                
+                # NEW: Also capture expected results on the same line
+                if ":" in line:
+                    parts = line.split(":", 1)
+                    if len(parts) > 1 and parts[1].strip():
+                        test_case["expectedResults"] = parts[1].strip() + "\n"
+            elif current_section == "steps" and line:
+                # Check if this line might be the Expected Results header without catching it above
+                if "Expected Results:" in line or "Expected Result:" in line:
+                    current_section = "expectedResults"
+                    test_case["expectedResults"] = ""
+                    
+                    # NEW: Also capture expected results on the same line
+                    if ":" in line:
+                        parts = line.split(":", 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            test_case["expectedResults"] = parts[1].strip() + "\n"
+                else:
+                    test_case["steps"] += line + "\n"
+            elif current_section == "expectedResults" and line:
+                test_case["expectedResults"] += line + "\n"
+        
+        # Clean up any extra whitespace
+        for key in test_case:
+            if isinstance(test_case[key], str):
+                test_case[key] = test_case[key].strip()
+        
+        # Ensure test case has a valid ID
+        if not test_case["id"] or test_case["id"].startswith('**'):
+            test_case["id"] = f"TC-ENV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                
+        # Add debug output
+        print(f"Parsed test case - ID: {test_case['id']}")
+        print(f"Title: '{test_case['title']}'")
+        print(f"Steps length: {len(test_case['steps'])}")
+        print(f"Expected Results length: {len(test_case['expectedResults'])}")
+        print(f"Expected Results: '{test_case['expectedResults']}'")
+        
+        return test_case
+
     def search_similar_test_cases(self, query_text, top=3):
         try:
             # Generate query embedding
@@ -226,23 +315,29 @@ class EmbeddingsGenerator:
                 print("Failed to generate embedding for query")
                 return []
 
-            # Correct vector search payload with required 'kind' parameter
-            vector_query = VectorQuery(
-                vector=query_embedding,
-                fields="vector",
-                kind="vector"
-            )
+            # Use a dictionary approach instead of VectorQuery object directly
+            # This bypasses the attribute validation issues
+            vector_query_dict = {
+                "kind": "vector",  # Put kind first to ensure it's processed
+                "vector": query_embedding,
+                "fields": "vector"
+            }
 
-            # Perform search with the correct parameter
-            results = self.search_client.search(
-                search_text=None,
-                vector_queries=[vector_query],
-                top=top,
-                select=["id", "title", "steps", "expectedResults"]
-            )
-
-            similar_cases = [doc for doc in results]
-            return similar_cases
+            # Perform search with the dictionary (not trying to convert to VectorQuery object)
+            try:
+                results = self.search_client.search(
+                    search_text=None,
+                    vector_queries=[vector_query_dict],  # Pass dictionary directly
+                    top=top,
+                    select=["id", "title", "steps", "expectedResults"]
+                )
+                
+                similar_cases = [doc for doc in results]
+                return similar_cases
+            except Exception as specific_e:
+                print(f"Specific search error: {specific_e}")
+                # If search fails, return empty list
+                return []
 
         except Exception as e:
             print(f"Error performing vector search: {str(e)}")

@@ -6,13 +6,13 @@ openai==1.58.1
 browser-use==0.1.39
 flaml[automl]
 # Azure SDK
-azure-search-documents==11.5.2
+azure-search-documents==11.6.0b1
 azure-core==1.29.5
 
 # Token Monitoring Dependencies
-tiktoken==0.5.1        # For token counting
+tiktoken>=0.7,<1.0        # For token counting
 matplotlib==3.8.0      # For report visualization
-requests==2.31.0       # For API calls
+requests>=2.32.3       # For API calls
 
 # Optional Dependencies
 pytest==7.4.3

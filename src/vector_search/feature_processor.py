@@ -123,7 +123,7 @@ class FeatureProcessor:
             results = list(self.search_client.search(
                 search_text="",
                 filter=f"id eq '{feature_id}'",
-                select=["id", "testCaseIds"]
+                select=["*"]  # Select all fields to ensure we get the complete document
             ))
             
             if not results:
@@ -147,14 +147,16 @@ class FeatureProcessor:
                 print(f"No new test cases to add for feature {feature_id}")
                 return True
             
-            # Update the feature document with combined test case IDs
+            # Update the document with combined test case IDs
             updated_test_case_ids = list(current_set | new_set)
             
-            self.search_client.upload_documents(documents=[{
-                "id": feature_id,
-                "testCaseIds": updated_test_case_ids,
-                "lastUpdated": datetime.now(timezone.utc).isoformat()
-            }])
+            # Create a complete document copy with only the fields to update
+            update_doc = dict(feature_doc)  # Create a complete copy of the document
+            update_doc["testCaseIds"] = updated_test_case_ids  # Update just the test case IDs
+            update_doc["lastUpdated"] = datetime.now(timezone.utc).isoformat()  # Update the timestamp
+            
+            # Upload the complete document with updates
+            self.search_client.upload_documents(documents=[update_doc])
             
             print(f"Successfully updated feature {feature_id} with {len(test_cases_to_add)} new test cases (total: {len(updated_test_case_ids)})")
             return True
