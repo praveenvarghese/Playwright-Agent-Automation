@@ -99,6 +99,189 @@ async def create_test_cases(similar_cases):
     
     return test_cases_content
 
+async def read_criteria_mapping_prompt():
+    """Read the criteria mapping prompt template from file."""
+    try:
+        prompt_file = os.path.join(PROMPTS_DIR, "criteria_mapping_prompt.txt")
+        with open(prompt_file, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError as e:
+        print_error(f"Error: Criteria mapping prompt file not found - {e}")
+        print_warning("Creating default criteria mapping prompt file...")
+        
+        # Create default prompt if file doesn't exist
+        default_prompt = """You are tasked with mapping test cases to the acceptance criteria they verify. 
+Analyze each test case and determine which acceptance criteria it is designed to verify.
+A test case may verify multiple criteria, and a criteria may be verified by multiple test cases.
+
+Acceptance Criteria:
+{acceptance_criteria}
+
+Test Cases:
+{test_cases}
+
+Format your response as a JSON object where:
+- Each key is a test case ID
+- Each value is an array of objects containing:
+  - criteriaId: The acceptance criteria ID (AC-001, AC-002, etc.)
+  - description: The full text of the acceptance criteria
+
+Example format:
+{
+  "TC-ENV-001": [
+    { "criteriaId": "AC-001", "description": "Users can create, edit, set default, and delete environments." },
+    { "criteriaId": "AC-002", "description": "Created environments should be visible in the environment list." }
+  ],
+  "TC-ENV-002": [
+    { "criteriaId": "AC-003", "description": "Environment names should support spaces." }
+  ]
+}
+
+Only include the JSON response, nothing else."""
+        
+        # Write default prompt to file
+        os.makedirs(os.path.dirname(prompt_file), exist_ok=True)
+        with open(prompt_file, "w", encoding="utf-8") as f:
+            f.write(default_prompt)
+        
+        return default_prompt
+    except Exception as e:
+        print_error(f"Error reading criteria mapping prompt: {str(e)}")
+        return None
+
+async def map_test_cases_to_criteria_with_ai(test_case_sections, acceptance_criteria):
+    """
+    Use AI to intelligently map test cases to acceptance criteria.
+    Uses an external prompt file for the mapping task.
+    
+    Args:
+        test_case_sections (list): List of test case text sections
+        acceptance_criteria (list): List of acceptance criteria
+        
+    Returns:
+        dict: Mapping of test case IDs to their criteria metadata
+    """
+    from config.config import TestCaseAgent
+    
+    # Read the criteria mapping prompt template
+    prompt_template = await read_criteria_mapping_prompt()
+    if not prompt_template:
+        print_error("Failed to read criteria mapping prompt template")
+        return fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria)
+    
+    # Prepare formatted acceptance criteria
+    criteria_formatted = "\n".join([f"{i+1}. {criteria}" for i, criteria in enumerate(acceptance_criteria)])
+    
+    # Prepare formatted test cases
+    test_cases_formatted = ""
+    test_case_ids = []
+    
+    # Extract IDs and prepare test cases for the prompt
+    for i, test_case in enumerate(test_case_sections):
+        # Extract ID using simple regex
+        import re
+        id_match = re.search(r'Test Case ID:[ \t]*([^\n\r]+)', test_case.replace('**', ''))
+        if id_match:
+            test_case_id = id_match.group(1).strip()
+            test_case_ids.append(test_case_id)
+            test_cases_formatted += f"\nTest Case {i+1}:\n{test_case.strip()}\n"
+    
+    # Fill in the prompt template
+    mapping_prompt = prompt_template.replace("{acceptance_criteria}", criteria_formatted)
+    mapping_prompt = mapping_prompt.replace("{test_cases}", test_cases_formatted)
+    
+    # Get AI response
+    try:
+        print_progress("Asking AI to analyze test cases and map to criteria...")
+        ai_response = await TestCaseAgent.a_generate_reply(
+            messages=[{"role": "user", "content": mapping_prompt}]
+        )
+        
+        # Save the AI response for debugging
+        ai_response_file = os.path.join(LOGS_DIR, f"ai_criteria_mapping_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt")
+        with open(ai_response_file, "w", encoding="utf-8") as f:
+            f.write(ai_response)
+        
+        # Parse the JSON response
+        import json
+        import re
+        
+        # Extract JSON from response if needed
+        json_match = re.search(r'({[\s\S]*})', ai_response)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            json_str = ai_response
+        
+        # Clean the string to ensure valid JSON
+        json_str = json_str.strip()
+        
+        # Parse the JSON
+        try:
+            mapping = json.loads(json_str)
+            print_success(f"Successfully mapped test cases to criteria using AI: {len(mapping)} mappings created")
+            return mapping
+        except json.JSONDecodeError as e:
+            print_error(f"Failed to parse AI response as JSON: {e}")
+            print(f"Response was: {ai_response[:200]}...")
+            # Fall back to a simpler mapping approach
+            return fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria)
+            
+    except Exception as e:
+        print_error(f"Error while using AI for mapping: {str(e)}")
+        # Fall back to a simpler mapping approach
+        return fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria)
+
+def fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria):
+    """
+    Fallback method to map test cases to criteria using keyword matching.
+    Used when AI mapping fails.
+    
+    Args:
+        test_case_sections (list): List of test case text sections
+        acceptance_criteria (list): List of acceptance criteria
+        
+    Returns:
+        dict: Mapping of test case IDs to their criteria metadata
+    """
+    print_warning("Using fallback method for mapping test cases to criteria")
+    mapping = {}
+    
+    for test_case in test_case_sections:
+        # Extract ID
+        import re
+        test_case = test_case.replace('**', '')
+        id_match = re.search(r'Test Case ID:[ \t]*([^\n\r]+)', test_case)
+        if not id_match:
+            continue
+            
+        test_case_id = id_match.group(1).strip()
+        test_case_content = test_case.lower()
+        
+        # Find matching criteria
+        criteria_matches = []
+        for i, criteria in enumerate(acceptance_criteria):
+            criteria_text = criteria.lower()
+            
+            # Extract key terms from criteria (words with 4+ characters)
+            key_terms = [word for word in criteria_text.split() if len(word) >= 4]
+            
+            # Count how many key terms match
+            matching_terms = sum(1 for term in key_terms if term in test_case_content)
+            
+            # If more than 30% of key terms match, consider it related
+            if matching_terms > 0 and (matching_terms / max(len(key_terms), 1) >= 0.3):
+                criteria_matches.append({
+                    "criteriaId": f"AC-{i+1:03d}",
+                    "description": criteria
+                })
+        
+        if criteria_matches:
+            mapping[test_case_id] = criteria_matches
+    
+    print_success(f"Fallback mapping created {len(mapping)} mappings")
+    return mapping
+
 async def process_and_store_test_cases(test_cases_content, feature_data=None):
     """Process the generated test cases and store them in the database."""
     print_progress("Processing and uploading test cases...")
@@ -125,6 +308,21 @@ async def process_and_store_test_cases(test_cases_content, feature_data=None):
     processed_test_cases = []
     test_case_ids = []  # Store test case IDs to update feature
     
+    # Extract acceptance criteria if feature data is available
+    acceptance_criteria = []
+    criteria_mapping = {}
+    
+    if feature_data and 'acceptance_criteria' in feature_data:
+        acceptance_criteria = feature_data['acceptance_criteria']
+        
+        # If we have acceptance criteria, use AI to map test cases to criteria
+        if acceptance_criteria:
+            print_progress("Using AI to map test cases to acceptance criteria...")
+            criteria_mapping = await map_test_cases_to_criteria_with_ai(
+                test_case_sections, 
+                acceptance_criteria
+            )
+    
     for i, test_case_text in enumerate(test_case_sections, 1):  # Start index from 1
         if not test_case_text.strip():
             continue
@@ -142,6 +340,11 @@ async def process_and_store_test_cases(test_cases_content, feature_data=None):
                     "featureId": feature_data["id"],
                     "lastUpdated": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
                 }
+                
+                # Add criteria metadata from AI mapping
+                if acceptance_criteria and parsed_case["id"] in criteria_mapping:
+                    parsed_case["criteriaMetadata"] = criteria_mapping[parsed_case["id"]]
+                    print(f"  Mapped to {len(parsed_case['criteriaMetadata'])} acceptance criteria")
             
             success = embeddings_generator.upload_test_case(parsed_case)
             if success:
@@ -180,4 +383,8 @@ async def process_and_store_test_cases(test_cases_content, feature_data=None):
             f.write(f"Expected Results:\n{case.get('expectedResults', 'None')}\n")
             if case.get("featureMetadata"):
                 f.write(f"Feature ID: {case.get('featureMetadata', {}).get('featureId', 'None')}\n")
+            if case.get("criteriaMetadata"):
+                f.write(f"Mapped Criteria:\n")
+                for criteria in case.get("criteriaMetadata", []):
+                    f.write(f"  - {criteria.get('criteriaId', 'Unknown')}: {criteria.get('description', 'None')}\n")
             f.write("\n---\n\n")
