@@ -166,78 +166,31 @@ class EmbeddingsGenerator:
                 
         return test_case
     
-    def upload_test_case(self, test_case):
-        """
-        Upload a test case with its embedding to Azure Cognitive Search.
-        Simplified for ID, Title, Steps, and Expected Results only.
-        
-        Args:
-            test_case (dict): The test case document with required fields
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        try:
-            # Ensure the test case has an ID
-            if not test_case.get("id"):
-                test_case["id"] = f"TC-ENV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            
-            # Clean the ID to ensure it's valid
-            test_case["id"] = ''.join(c for c in test_case["id"] if c.isalnum() or c in ['-', '_', '='])
-            
-            # Validate test case has required content
-            if not test_case.get("title") or not test_case.get("steps") or not test_case.get("expectedResults"):
-                print(f"Skipping upload for test case ID {test_case.get('id')} - missing required fields")
-                return False
-            
-            # Ensure createdDate exists
-            if not test_case.get("createdDate"):
-                test_case["createdDate"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            
-            # Extract content to generate embedding
-            content_for_embedding = f"{test_case.get('title', '')} {test_case.get('steps', '')} {test_case.get('expectedResults', '')}"
-            
-            # Generate embedding
-            embedding = self.generate_embedding(content_for_embedding)
-            
-            if not embedding:
-                print(f"Failed to generate embedding for test case: {test_case.get('id')}")
-                return False
-            
-            # Add embedding to the test case document
-            test_case["vector"] = embedding
-            
-            # Upload to Azure Cognitive Search
-            try:
-                self.search_client.upload_documents(documents=[test_case])
-                print(f"Successfully uploaded test case: {test_case.get('id')}")
-                return True
-            except Exception as e:
-                print(f"Error uploading test case: {str(e)}")
-                return False
-        except Exception as e:
-            print(f"Unexpected error in upload_test_case: {str(e)}")
-            return False
-    
     def parse_test_case_from_text(self, text):
         """
         Parse a test case from generated text output.
-        Updated to handle Markdown formatting with asterisks.
+        Updated to include default values for status and other metadata.
         
         Args:
             text (str): The generated test case text
             
         Returns:
-            dict: Structured test case
+            dict: Structured test case with default values
         """
         # Simple parsing based on simplified format
         lines = text.strip().split('\n')
+        
+        # Initialize with default values
         test_case = {
             "id": "",
             "title": "",
             "steps": "",
             "expectedResults": "",
-            "createdDate": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # Ensure this is always set
+            "createdDate": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            #"lastUpdated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "status": "Active",  # Default status for new test cases
+            "version": "1.0",    # Default version for new test cases
+            #"notes": ""          # Empty notes field for tracking changes
         }
         
         current_section = None
@@ -268,7 +221,7 @@ class EmbeddingsGenerator:
                 current_section = "expectedResults"
                 test_case["expectedResults"] = ""
                 
-                # NEW: Also capture expected results on the same line
+                # Also capture expected results on the same line
                 if ":" in line:
                     parts = line.split(":", 1)
                     if len(parts) > 1 and parts[1].strip():
@@ -279,7 +232,7 @@ class EmbeddingsGenerator:
                     current_section = "expectedResults"
                     test_case["expectedResults"] = ""
                     
-                    # NEW: Also capture expected results on the same line
+                    # Also capture expected results on the same line
                     if ":" in line:
                         parts = line.split(":", 1)
                         if len(parts) > 1 and parts[1].strip():
@@ -297,51 +250,123 @@ class EmbeddingsGenerator:
         # Ensure test case has a valid ID
         if not test_case["id"] or test_case["id"].startswith('**'):
             test_case["id"] = f"TC-ENV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # Add creation note
+        test_case["notes"] = f"[{datetime.now().strftime('%Y-%m-%d')}] Test case created\n"
                 
         # Add debug output
         print(f"Parsed test case - ID: {test_case['id']}")
         print(f"Title: '{test_case['title']}'")
         print(f"Steps length: {len(test_case['steps'])}")
         print(f"Expected Results length: {len(test_case['expectedResults'])}")
-        print(f"Expected Results: '{test_case['expectedResults']}'")
+        print(f"Status: {test_case['status']}")
         
         return test_case
 
-    def search_similar_test_cases(self, query_text, top=3):
+    def upload_test_case(self, test_case):
+        """
+        Upload a test case with its embedding to Azure Cognitive Search.
+        Updated to handle metadata and status fields.
+        
+        Args:
+            test_case (dict): The test case document with required fields
+            
+        Returns:
+                bool: True if successful, False otherwise
+        """
         try:
-            # Generate query embedding
-            query_embedding = self.generate_embedding(query_text)
-            if not query_embedding:
-                print("Failed to generate embedding for query")
-                return []
-
-            # Use a dictionary approach instead of VectorQuery object directly
-            # This bypasses the attribute validation issues
-            vector_query_dict = {
-                "kind": "vector",  # Put kind first to ensure it's processed
-                "vector": query_embedding,
-                "fields": "vector"
-            }
-
-            # Perform search with the dictionary (not trying to convert to VectorQuery object)
-            try:
-                results = self.search_client.search(
-                    search_text=None,
-                    vector_queries=[vector_query_dict],  # Pass dictionary directly
-                    top=top,
-                    select=["id", "title", "steps", "expectedResults"]
-                )
+            # Ensure the test case has an ID
+            if not test_case.get("id"):
+                test_case["id"] = f"TC-ENV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            
+            # Clean the ID to ensure it's valid
+            test_case["id"] = ''.join(c for c in test_case["id"] if c.isalnum() or c in ['-', '_', '='])
+            
+            # Validate test case has required content
+            if not test_case.get("title") or not test_case.get("steps") or not test_case.get("expectedResults"):
+                print(f"Skipping upload for test case ID {test_case.get('id')} - missing required fields")
+                return False
+            
+            # Ensure all required metadata fields exist
+            if not test_case.get("createdDate"):
+                test_case["createdDate"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            # if not test_case.get("lastUpdated"):
+            #     test_case["lastUpdated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            if not test_case.get("status"):
+                test_case["status"] = "Active"
                 
-                similar_cases = [doc for doc in results]
-                return similar_cases
-            except Exception as specific_e:
-                print(f"Specific search error: {specific_e}")
-                # If search fails, return empty list
-                return []
+            if not test_case.get("version"):
+                test_case["version"] = "1.0"
 
+            for field_to_remove in ["lastUpdated", "notes", "statusReason", "archivedDate"]:
+                if field_to_remove in test_case:
+                    del test_case[field_to_remove]
+                
+            # if not test_case.get("notes"):
+            #     test_case["notes"] = ""
+            
+            # Extract content to generate embedding
+            content_for_embedding = f"{test_case.get('title', '')} {test_case.get('steps', '')} {test_case.get('expectedResults', '')}"
+            
+            # Generate embedding
+            embedding = self.generate_embedding(content_for_embedding)
+            
+            if not embedding:
+                print(f"Failed to generate embedding for test case: {test_case.get('id')}")
+                return False
+            
+            # Add embedding to the test case document
+            test_case["vector"] = embedding
+            
+            # Upload to Azure Cognitive Search
+            try:
+                self.search_client.upload_documents(documents=[test_case])
+                print(f"Successfully uploaded test case: {test_case.get('id')}")
+                return True
+            except Exception as e:
+                print(f"Error uploading test case: {str(e)}")
+                return False
         except Exception as e:
-            print(f"Error performing vector search: {str(e)}")
-            return []
+            print(f"Unexpected error in upload_test_case: {str(e)}")
+            return False
+        
+    def search_similar_test_cases(self, query_text, top=3):
+            try:
+                # Generate query embedding
+                query_embedding = self.generate_embedding(query_text)
+                if not query_embedding:
+                    print("Failed to generate embedding for query")
+                    return []
+
+                # Use a dictionary approach instead of VectorQuery object directly
+                # This bypasses the attribute validation issues
+                vector_query_dict = {
+                    "kind": "vector",  # Put kind first to ensure it's processed
+                    "vector": query_embedding,
+                    "fields": "vector"
+                }
+
+                # Perform search with the dictionary (not trying to convert to VectorQuery object)
+                try:
+                    results = self.search_client.search(
+                        search_text=None,
+                        vector_queries=[vector_query_dict],  # Pass dictionary directly
+                        top=top,
+                        select=["id", "title", "steps", "expectedResults"]
+                    )
+                    
+                    similar_cases = [doc for doc in results]
+                    return similar_cases
+                except Exception as specific_e:
+                    print(f"Specific search error: {specific_e}")
+                    # If search fails, return empty list
+                    return []
+
+            except Exception as e:
+                print(f"Error performing vector search: {str(e)}")
+                return []
 
 
 # Example usage - only runs if script is executed directly

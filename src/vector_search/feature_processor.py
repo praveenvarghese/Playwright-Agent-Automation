@@ -414,6 +414,117 @@ class FeatureProcessor:
             print(f"Error processing feature: {str(e)}")
             return None
 
+    # Add these methods to your FeatureProcessor class in feature_processor.py
+
+    def update_feature_with_criteria(self, feature_id, feature_data, updated_criteria, preserve_test_cases=True):
+        """
+        Update a feature with new criteria while preserving test case links.
+        
+        Args:
+            feature_id (str): The feature ID to update
+            feature_data (dict): The new feature data
+            updated_criteria (list): List of updated criteria objects
+            preserve_test_cases (bool): Whether to preserve existing test case links
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Get existing test case IDs if preserving
+            existing_test_case_ids = []
+            if preserve_test_cases:
+                existing_test_case_ids = self.get_existing_test_case_ids(feature_id)
+            
+            # Ensure criteria objects only contain fields in your schema
+            # This prevents errors about unknown fields
+            sanitized_criteria = []
+            for criteria in updated_criteria:
+                # Only include fields that are known to exist in your schema
+                sanitized = {
+                    "id": criteria.get("id", ""),
+                    "description": criteria.get("description", ""),
+                    "status": criteria.get("status", "Active"),
+                    "addedDate": criteria.get("addedDate", datetime.now(timezone.utc).isoformat())
+                }
+                sanitized_criteria.append(sanitized)
+            
+            # Prepare document for Cognitive Search
+            search_doc = {
+                "id": feature_id,
+                "name": feature_data.get('title', ''),
+                "description": feature_data.get('description', ''),
+                "status": self.registry['features'][feature_data['title']]['status'],
+                "version": str(self.registry['features'][feature_data['title']]['latest_version']),
+                "createdDate": self.registry['features'][feature_data['title']]['created'],
+                "lastUpdated": datetime.now(timezone.utc).isoformat(),
+                "acceptanceCriteria": sanitized_criteria,
+                "testCaseIds": existing_test_case_ids
+            }
+            
+            # Upload to Azure Cognitive Search
+            self.search_client.upload_documents(documents=[search_doc])
+            print(f"Successfully updated feature: {feature_id}")
+            
+            return True
+        
+        except Exception as e:
+            print(f"Error updating feature: {str(e)}")
+            return False
+
+    def get_existing_test_case_ids(self, feature_id):
+        """
+        Get existing test case IDs for a feature.
+        
+        Args:
+            feature_id (str): The feature ID
+            
+        Returns:
+            list: List of test case IDs
+        """
+        try:
+            results = list(self.search_client.search(
+                search_text="",
+                filter=f"id eq '{feature_id}'",
+                select=["testCaseIds"]
+            ))
+            
+            if results and results[0].get("testCaseIds"):
+                return results[0].get("testCaseIds")
+            return []
+        
+        except Exception as e:
+            print(f"Error getting test case IDs: {str(e)}")
+            return []
+
+    def merge_acceptance_criteria(self, original_criteria, updated_criteria):
+        """
+        Merge original and updated acceptance criteria intelligently.
+        Preserves IDs where possible and tracks history of changes.
+        
+        Args:
+            original_criteria (list): List of original criteria objects
+            updated_criteria (list): List of updated criteria objects
+            
+        Returns:
+            list: Merged list of criteria objects
+        """
+        # Create maps for quick lookup
+        original_by_id = {c.get("id"): c for c in original_criteria if c.get("id")}
+        updated_by_id = {c.get("id"): c for c in updated_criteria if c.get("id")}
+        
+        # Start with all updated criteria
+        result = list(updated_criteria)
+        
+        for original_id, original in original_by_id.items():
+            if original_id not in updated_by_id:
+                # This criteria was removed, mark it as deprecated
+                deprecated = dict(original)
+                deprecated["status"] = "Deprecated"
+                # Use addedDate instead of removedDate to avoid schema issues
+                deprecated["addedDate"] = datetime.now(timezone.utc).isoformat()
+                result.append(deprecated)
+        
+        return result
 
 # Example usage
 if __name__ == "__main__":

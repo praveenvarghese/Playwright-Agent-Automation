@@ -125,15 +125,16 @@ Format your response as a JSON object where:
 - Each value is an array of objects containing:
   - criteriaId: The acceptance criteria ID (AC-001, AC-002, etc.)
   - description: The full text of the acceptance criteria
+  - status: Always set this to "Active" for newly mapped criteria
 
 Example format:
 {
   "TC-ENV-001": [
-    { "criteriaId": "AC-001", "description": "Users can create, edit, set default, and delete environments." },
-    { "criteriaId": "AC-002", "description": "Created environments should be visible in the environment list." }
+    { "criteriaId": "AC-001", "description": "Users can create, edit, set default, and delete environments.", "status": "Active" },
+    { "criteriaId": "AC-002", "description": "Created environments should be visible in the environment list.", "status": "Active" }
   ],
   "TC-ENV-002": [
-    { "criteriaId": "AC-003", "description": "Environment names should support spaces." }
+    { "criteriaId": "AC-003", "description": "Environment names should support spaces.", "status": "Active" }
   ]
 }
 
@@ -219,6 +220,13 @@ async def map_test_cases_to_criteria_with_ai(test_case_sections, acceptance_crit
         # Parse the JSON
         try:
             mapping = json.loads(json_str)
+            
+            # Ensure each mapping has the status field set to "Active"
+            for test_case_id, criteria_list in mapping.items():
+                for criteria in criteria_list:
+                    if "status" not in criteria:
+                        criteria["status"] = "Active"
+            
             print_success(f"Successfully mapped test cases to criteria using AI: {len(mapping)} mappings created")
             return mapping
         except json.JSONDecodeError as e:
@@ -273,7 +281,8 @@ def fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria)
             if matching_terms > 0 and (matching_terms / max(len(key_terms), 1) >= 0.3):
                 criteria_matches.append({
                     "criteriaId": f"AC-{i+1:03d}",
-                    "description": criteria
+                    "description": criteria,
+                    "status": "Active"  # Explicitly set status to Active
                 })
         
         if criteria_matches:
