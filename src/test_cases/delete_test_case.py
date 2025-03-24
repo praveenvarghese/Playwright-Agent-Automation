@@ -210,10 +210,7 @@ class FeatureDeleter:
         """
         try:
             # First, get confirmation from the user
-            confirm = input("Are you sure you want to delete ALL features? This cannot be undone. (y/n): ")
-            if confirm.lower() != 'y':
-                print("Operation cancelled.")
-                return 0
+            
                 
             results = self.search_client.search(
                 search_text="*",
