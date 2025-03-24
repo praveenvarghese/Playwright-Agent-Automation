@@ -156,11 +156,13 @@ async def update_feature_workflow(feature_data):
         if not original_feature:
             print(f"⚠️ Couldn't find original feature with ID {feature_data['id']}. Will proceed as new feature.")
             return False
+        
         print(f"🔹 Repairing feature-test case relationship before update...")
         feature_processor = FeatureProcessor()
         repair_result = feature_processor.repair_feature_test_case_relationship(feature_data['id'])
         if repair_result["errors"] > 0:
             print(f"⚠️ Some errors occurred during relationship repair, but continuing with update")
+        
         # Step 2: Analyze acceptance criteria changes
         criteria_changes = analyze_criteria_changes(
             original_criteria=original_feature.get('acceptanceCriteria', []),
@@ -183,6 +185,7 @@ async def update_feature_workflow(feature_data):
         print(f"🔹 Found {len(existing_test_cases)} existing test cases for this feature")
         
         await fix_null_status_in_test_cases(feature_data['id'])
+        
         # Step 4: Analyze test cases in relation to criteria changes
         test_case_decision = analyze_test_cases(existing_test_cases, criteria_changes)
         
@@ -210,6 +213,32 @@ async def update_feature_workflow(feature_data):
         if not feature_update_success:
             print(f"⚠️ Failed to update feature with new criteria")
             return False
+
+        # Check for criteria that changed from Deprecated to Active
+        reactivated_criteria_ids = []
+
+        if original_feature and "acceptanceCriteria" in original_feature:
+            # Find criteria that were Deprecated in original but are Active now
+            original_deprecated_ids = [
+                c.get("id") for c in original_feature["acceptanceCriteria"]
+                if c.get("status") == "Deprecated" and c.get("id")
+            ]
+            
+            # Check which of these are now Active in the updated criteria
+            for criteria_id in original_deprecated_ids:
+                for criteria in updated_criteria_objects:
+                    if criteria.get("id") == criteria_id and criteria.get("status") == "Active":
+                        reactivated_criteria_ids.append(criteria_id)
+                        print(f"🔹 Detected criteria {criteria_id} changed from Deprecated to Active")
+                        break
+
+        # Reactivate criteria in test cases if needed
+        if reactivated_criteria_ids:
+            print(f"🔹 Reactivating criteria in test cases: {', '.join(reactivated_criteria_ids)}")
+            await reactivate_criteria_in_test_cases(
+                feature_id=feature_data['id'],
+                reactivated_criteria_ids=reactivated_criteria_ids
+            )
 
         # Fix test cases that contain criteria from this feature but don't have feature metadata
         if 'reactivated' in criteria_changes and criteria_changes['reactivated']:
@@ -294,10 +323,12 @@ async def update_feature_workflow(feature_data):
         if consistency_fixes > 0:
             print(f"🔹 Fixed criteria status in {consistency_fixes} test cases")
 
+        # Final metadata verification
         print(f"🔹 Performing final metadata verification...")
         final_fixes = await fix_test_case_metadata_issues(feature_data['id'], fix_null_status=True)
         if final_fixes > 0:
             print(f"✅ Fixed metadata issues in {final_fixes} test cases during final verification")
+            
         print(f"✅ Feature update workflow completed successfully for {feature_data['id']}")
         return True
         
