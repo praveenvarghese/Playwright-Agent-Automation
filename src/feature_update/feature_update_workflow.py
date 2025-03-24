@@ -253,7 +253,8 @@ async def update_feature_workflow(feature_data):
         if test_case_decision['keep_with_updates']:
             update_success = await update_test_case_criteria_mappings(
                 test_cases=test_case_decision['keep_with_updates'],
-                criteria_map=get_criteria_id_map(updated_criteria_objects)
+                criteria_map=get_criteria_id_map(updated_criteria_objects),
+                feature_id=feature_data['id']  # Pass the feature ID
             )
             if not update_success:
                 print(f"⚠️ Some test cases could not be updated properly")
@@ -287,6 +288,16 @@ async def update_feature_workflow(feature_data):
             else:
                 print(f"⚠️ No new test cases were generated")
         
+        # Verify and fix criteria status consistency
+        print(f"🔹 Verifying criteria status consistency...")
+        consistency_fixes = await verify_criteria_status_consistency(feature_data['id'])
+        if consistency_fixes > 0:
+            print(f"🔹 Fixed criteria status in {consistency_fixes} test cases")
+
+        print(f"🔹 Performing final metadata verification...")
+        final_fixes = await fix_test_case_metadata_issues(feature_data['id'], fix_null_status=True)
+        if final_fixes > 0:
+            print(f"✅ Fixed metadata issues in {final_fixes} test cases during final verification")
         print(f"✅ Feature update workflow completed successfully for {feature_data['id']}")
         return True
         
@@ -554,13 +565,15 @@ def get_criteria_id_map(criteria_objects):
     
     return criteria_map
 
-async def update_test_case_criteria_mappings(test_cases, criteria_map):
+async def update_test_case_criteria_mappings(test_cases, criteria_map, feature_id):
     """
     Update criteria mappings for test cases that need updates.
+    Enhanced to ensure featureMetadata is preserved.
     
     Args:
         test_cases (list): Test cases to update
         criteria_map (dict): Mapping of criteria descriptions to objects
+        feature_id (str): The feature ID to associate with test cases
         
     Returns:
         bool: True if successful, False otherwise
@@ -582,7 +595,8 @@ async def update_test_case_criteria_mappings(test_cases, criteria_map):
                 # Update to the latest criteria
                 updated_metadata.append({
                     "criteriaId": criteria_map[description]["id"],
-                    "description": criteria_map[description]["description"]
+                    "description": criteria_map[description]["description"],
+                    "status": criteria.get("status", "Active")  # Preserve existing status if present
                 })
             else:
                 # Try fuzzy matching if exact match fails
@@ -598,19 +612,35 @@ async def update_test_case_criteria_mappings(test_cases, criteria_map):
                 if best_match:
                     updated_metadata.append({
                         "criteriaId": best_match["id"],
-                        "description": best_match["description"]
+                        "description": best_match["description"],
+                        "status": criteria.get("status", "Active")  # Preserve existing status
                     })
                 else:
                     # If no good match, keep the original but mark it
                     print_warning(f"No match found for criteria: {description}")
                     updated_metadata.append(criteria)
         
-        # Update the test case if metadata changed
-        if updated_metadata != criteria_metadata:
-            test_case["criteriaMetadata"] = updated_metadata
-            success = embeddings_generator.upload_test_case(test_case)
+        # Update the test case if metadata changed or featureMetadata is missing
+        needs_update = (updated_metadata != criteria_metadata) or (test_case.get("featureMetadata") is None)
+        
+        if needs_update:
+            # Create a deep copy to avoid reference issues
+            updated_test_case = dict(test_case)
+            
+            # Update criteria metadata if changed
+            if updated_metadata != criteria_metadata:
+                updated_test_case["criteriaMetadata"] = updated_metadata
+            
+            # Always ensure proper featureMetadata is set
+            updated_test_case["featureMetadata"] = {
+                "featureId": feature_id,
+                "lastUpdated": datetime.now(timezone.utc).isoformat()
+            }
+            
+            success = embeddings_generator.upload_test_case(updated_test_case)
             if success:
                 update_count += 1
+                print(f"✅ Updated test case {test_case.get('id')} with proper metadata")
             else:
                 print_warning(f"Failed to update test case {test_case.get('id')}")
     
@@ -919,7 +949,15 @@ async def mark_test_case_deprecated(test_case_id, reason="Feature deprecated", r
 async def mark_deprecated_criteria_in_test_cases(feature_id, removed_criteria_ids, keep_test_cases=[]):
     """
     Explicitly mark deprecated criteria as inactive in test cases.
-    Fixed to prevent test case deletion issues.
+    Enhanced to ensure all test cases are properly updated.
+    
+    Args:
+        feature_id (str): The feature ID
+        removed_criteria_ids (list): List of criteria IDs that were removed
+        keep_test_cases (list): Optional list of test cases to process
+        
+    Returns:
+        int: Number of test cases updated
     """
     if not removed_criteria_ids:
         print(f"🔹 No criteria were removed, no cleanup needed")
@@ -942,70 +980,177 @@ async def mark_deprecated_criteria_in_test_cases(feature_id, removed_criteria_id
     
     for test_case in test_cases:
         test_case_id = test_case.get("id")
+        if not test_case_id:
+            continue
+            
         criteria_metadata = test_case.get("criteriaMetadata", []) or []
         
         if not criteria_metadata:
             continue
             
-        # Debug output to help identify issues
+        # Debug output
         print(f"🔹 Processing test case {test_case_id} with {len(criteria_metadata)} criteria references")
         
-        # Create a new criteria metadata list instead of modifying in-place
+        # Create a deep copy of test case to avoid reference issues
+        updated_test_case = dict(test_case)
         new_criteria_metadata = []
         updated = False
         
+        # Check each criteria
         for criteria in criteria_metadata:
             criteria_id = criteria.get("criteriaId")
-            description = criteria.get("description", "")
-            current_status = criteria.get("status", "Active")  # Default to Active if null
-            
-            # Create a copy of the criteria to avoid reference issues
+            if not criteria_id:
+                continue
+                
+            # Make a deep copy of the criteria
             new_criteria = dict(criteria)
             
-            # If this is a criteria that needs to be marked inactive
+            # If this is a criteria that was removed, mark it as inactive
             if criteria_id in removed_criteria_ids:
+                current_status = criteria.get("status")
+                
                 # Only update if not already inactive
                 if current_status != "Inactive":
-                    # Update status and add removedDate
                     new_criteria["status"] = "Inactive"
                     new_criteria["removedDate"] = datetime.now(timezone.utc).isoformat()
                     updated = True
                     print(f"🔹 Marked criteria {criteria_id} as inactive in test case {test_case_id}")
             
-            # Add the criteria to the new list
+            # Always ensure status is set (not null)
+            elif new_criteria.get("status") is None:
+                new_criteria["status"] = "Active"
+                updated = True
+                print(f"🔹 Fixed null status for criteria {criteria_id} in test case {test_case_id}")
+                
             new_criteria_metadata.append(new_criteria)
         
-        # If criteria were marked as inactive, update the test case
+        # If anything was updated, update the test case
         if updated:
-            # Make a complete copy of the test case
-            updated_test_case = dict(test_case)
-            
-            # Update the criteria metadata with our new list
             updated_test_case["criteriaMetadata"] = new_criteria_metadata
             
-            # Update the test case timestamp
-            if "featureMetadata" in updated_test_case:
+            # Ensure featureMetadata is properly set
+            if not updated_test_case.get("featureMetadata") or updated_test_case.get("featureMetadata") is None:
+                updated_test_case["featureMetadata"] = {
+                    "featureId": feature_id,
+                    "lastUpdated": datetime.now(timezone.utc).isoformat()
+                }
+            elif "featureMetadata" in updated_test_case:
                 updated_test_case["featureMetadata"]["lastUpdated"] = datetime.now(timezone.utc).isoformat()
             
-            # Verify all required fields are present
-            for required_field in ["title", "steps", "expectedResults"]:
-                if not updated_test_case.get(required_field):
-                    print(f"⚠️ Test case {test_case_id} is missing required field: {required_field}")
-                    print(f"   Original: {test_case.get(required_field)}")
-                    print(f"   Updated: {updated_test_case.get(required_field)}")
-            
             # Upload the updated test case
-            success = embeddings_generator.upload_test_case(updated_test_case)
-            if success:
-                updated_count += 1
-                print(f"✅ Successfully updated test case {test_case_id}")
-            else:
-                print(f"⚠️ Failed to update test case {test_case_id}")
-                # Try to print more details about the test case
-                print(f"   Fields: {', '.join(updated_test_case.keys())}")
+            try:
+                success = embeddings_generator.upload_test_case(updated_test_case)
+                if success:
+                    updated_count += 1
+                    print(f"✅ Successfully updated test case {test_case_id}")
+                else:
+                    print(f"⚠️ Failed to update test case {test_case_id}")
+            except Exception as e:
+                print(f"❌ Error updating test case {test_case_id}: {str(e)}")
     
-    print(f"✅ Marked deprecated criteria as inactive in {updated_count} test cases")
-    return updated_count
+    # If no test cases were updated but there should have been updates, check all test cases
+    if updated_count == 0 and len(removed_criteria_ids) > 0:
+        print(f"⚠️ No test cases were updated. Attempting more aggressive search...")
+        
+        # Try to find ALL test cases that might reference these criteria
+        all_test_cases = []
+        
+        for criteria_id in removed_criteria_ids:
+            try:
+                # Search for test cases with this criteria ID
+                criteria_filter = f"criteriaMetadata/any(c: c/criteriaId eq '{criteria_id}')"
+                matching_cases = list(embeddings_generator.search_client.search(
+                    search_text="*",
+                    filter=criteria_filter,
+                    select=["*"],
+                    top=1000
+                ))
+                
+                if matching_cases:
+                    print(f"🔹 Found {len(matching_cases)} test cases with criteria {criteria_id}")
+                    all_test_cases.extend(matching_cases)
+            except Exception as e:
+                print(f"⚠️ Error searching for test cases with criteria {criteria_id}: {str(e)}")
+        
+        # Process all found test cases directly (without recursion)
+        if all_test_cases:
+            # Remove duplicates
+            unique_ids = set()
+            unique_cases = []
+            
+            for tc in all_test_cases:
+                tc_id = tc.get("id")
+                if tc_id and tc_id not in unique_ids:
+                    unique_ids.add(tc_id)
+                    unique_cases.append(tc)
+            
+            # Process the unique test cases directly in this function
+            print(f"🔹 Found {len(unique_cases)} unique test cases with the removed criteria")
+            
+            # Process each test case without recursion
+            fallback_count = 0
+            for test_case in unique_cases:
+                test_case_id = test_case.get("id")
+                if not test_case_id:
+                    continue
+                    
+                criteria_metadata = test_case.get("criteriaMetadata", []) or []
+                
+                if not criteria_metadata:
+                    continue
+                    
+                # Same logic as above for processing criteria
+                updated_test_case = dict(test_case)
+                new_criteria_metadata = []
+                updated = False
+                
+                for criteria in criteria_metadata:
+                    criteria_id = criteria.get("criteriaId")
+                    if not criteria_id:
+                        continue
+                        
+                    new_criteria = dict(criteria)
+                    
+                    if criteria_id in removed_criteria_ids:
+                        current_status = criteria.get("status")
+                        
+                        if current_status != "Inactive":
+                            new_criteria["status"] = "Inactive"
+                            new_criteria["removedDate"] = datetime.now(timezone.utc).isoformat()
+                            updated = True
+                            print(f"🔹 Marked criteria {criteria_id} as inactive in test case {test_case_id} (fallback)")
+                    
+                    elif new_criteria.get("status") is None:
+                        new_criteria["status"] = "Active"
+                        updated = True
+                        print(f"🔹 Fixed null status for criteria {criteria_id} in test case {test_case_id} (fallback)")
+                        
+                    new_criteria_metadata.append(new_criteria)
+                
+                if updated:
+                    updated_test_case["criteriaMetadata"] = new_criteria_metadata
+                    
+                    # Ensure featureMetadata is set
+                    if not updated_test_case.get("featureMetadata") or updated_test_case.get("featureMetadata") is None:
+                        updated_test_case["featureMetadata"] = {
+                            "featureId": feature_id,
+                            "lastUpdated": datetime.now(timezone.utc).isoformat()
+                        }
+                    elif "featureMetadata" in updated_test_case:
+                        updated_test_case["featureMetadata"]["lastUpdated"] = datetime.now(timezone.utc).isoformat()
+                    
+                    try:
+                        success = embeddings_generator.upload_test_case(updated_test_case)
+                        if success:
+                            fallback_count += 1
+                            print(f"✅ Successfully updated test case {test_case_id} (fallback)")
+                        else:
+                            print(f"⚠️ Failed to update test case {test_case_id} (fallback)")
+                    except Exception as e:
+                        print(f"❌ Error updating test case {test_case_id} (fallback): {str(e)}")
+            
+            updated_count += fallback_count
+            print(f"✅ Marked deprecated criteria as inactive in {fallback_count} additional test cases")
 
 async def reactivate_criteria_in_test_cases(feature_id, reactivated_criteria_ids, new_descriptions=None):
     """
@@ -1267,3 +1412,245 @@ async def fix_missing_feature_metadata(feature_id, criteria_ids=None):
         traceback.print_exc()
         return 0
     
+async def fix_test_case_metadata_issues(feature_id, fix_null_status=True):
+    """
+    Comprehensive fix for test case metadata issues:
+    - Fixes missing feature metadata
+    - Fixes null status values in criteria
+    - Ensures all test cases have proper associations
+    
+    Args:
+        feature_id (str): The feature ID to associate with test cases
+        fix_null_status (bool): Whether to also fix null status values
+        
+    Returns:
+        int: Number of test cases fixed
+    """
+    print(f"🔹 Fixing metadata issues for test cases related to feature {feature_id}")
+    
+    # Initialize components
+    embeddings_generator = EmbeddingsGenerator()
+    vector_system = VectorRetrievalSystem()
+    
+    # First, get all test cases for this feature
+    # This will find test cases that already have the correct featureMetadata
+    feature_test_cases = await vector_system.retrieve_test_cases_by_feature_id(feature_id)
+    
+    # Then, search for all test cases that might be related to this feature
+    # This will include test cases with missing featureMetadata
+    feature_processor = FeatureProcessor()
+    feature_results = list(feature_processor.search_client.search(
+        search_text="",
+        filter=f"id eq '{feature_id}'",
+        select=["acceptanceCriteria"]
+    ))
+    
+    criteria_ids = []
+    if feature_results and feature_results[0].get("acceptanceCriteria"):
+        criteria_ids = [c.get("id") for c in feature_results[0].get("acceptanceCriteria") if c.get("id")]
+    
+    # Track test cases by ID to avoid duplicates
+    test_case_map = {tc.get("id"): tc for tc in feature_test_cases if tc.get("id")}
+    
+    # Now search for test cases with any of these criteria
+    for criteria_id in criteria_ids:
+        try:
+            criteria_filter = f"criteriaMetadata/any(c: c/criteriaId eq '{criteria_id}')"
+            matching_cases = list(embeddings_generator.search_client.search(
+                search_text="*",
+                filter=criteria_filter,
+                select=["*"],
+                top=1000
+            ))
+            
+            # Add to the map, avoiding duplicates
+            for tc in matching_cases:
+                tc_id = tc.get("id")
+                if tc_id and tc_id not in test_case_map:
+                    test_case_map[tc_id] = tc
+                    
+        except Exception as e:
+            print(f"⚠️ Error searching for test cases with criteria {criteria_id}: {str(e)}")
+    
+    # Process all found test cases
+    fixed_count = 0
+    
+    for tc_id, test_case in test_case_map.items():
+        updated = False
+        updated_test_case = dict(test_case)
+        
+        # 1. Fix missing feature metadata
+        if test_case.get("featureMetadata") is None or not test_case.get("featureMetadata").get("featureId"):
+            updated_test_case["featureMetadata"] = {
+                "featureId": feature_id,
+                "lastUpdated": datetime.now(timezone.utc).isoformat()
+            }
+            updated = True
+            print(f"🔹 Setting missing feature metadata for test case {tc_id}")
+        
+        # 2. Fix null status values in criteria
+        if fix_null_status:
+            criteria_metadata = test_case.get("criteriaMetadata", []) or []
+            updated_criteria = []
+            criteria_updated = False
+            
+            for criteria in criteria_metadata:
+                updated_criteria_item = dict(criteria)
+                
+                # Fix null status
+                if criteria.get("status") is None:
+                    updated_criteria_item["status"] = "Active"
+                    criteria_updated = True
+                    print(f"🔹 Fixed null status for criteria {criteria.get('criteriaId')} in test case {tc_id}")
+                
+                updated_criteria.append(updated_criteria_item)
+            
+            if criteria_updated:
+                updated_test_case["criteriaMetadata"] = updated_criteria
+                updated = True
+        
+        # Update the test case if needed
+        if updated:
+            # Ensure required fields are present
+            if not updated_test_case.get("title") or not updated_test_case.get("steps") or not updated_test_case.get("expectedResults"):
+                print(f"⚠️ Test case {tc_id} is missing required fields, skipping update")
+                continue
+                
+            try:
+                success = embeddings_generator.upload_test_case(updated_test_case)
+                if success:
+                    fixed_count += 1
+                    print(f"✅ Fixed metadata for test case {tc_id}")
+                else:
+                    print(f"⚠️ Failed to update test case {tc_id}")
+            except Exception as e:
+                print(f"❌ Error updating test case {tc_id}: {str(e)}")
+    
+    print(f"✅ Fixed metadata issues in {fixed_count} test cases for feature {feature_id}")
+    return fixed_count
+
+async def verify_criteria_status_consistency(feature_id):
+    """
+    Verify and fix status consistency between feature criteria and test case criteria.
+    Should be run after feature updates to ensure all test cases reflect proper criteria status.
+    
+    Args:
+        feature_id (str): The feature ID to verify
+        
+    Returns:
+        int: Number of test cases fixed
+    """
+    print(f"🔹 Verifying criteria status consistency for feature {feature_id}")
+    
+    # Get feature data to get current criteria status
+    feature_processor = FeatureProcessor()
+    feature_results = list(feature_processor.search_client.search(
+        search_text="",
+        filter=f"id eq '{feature_id}'",
+        select=["acceptanceCriteria"]
+    ))
+    
+    if not feature_results:
+        print(f"⚠️ Cannot find feature {feature_id}")
+        return 0
+        
+    # Get criteria status from feature
+    feature_criteria = {}
+    for criteria in feature_results[0].get("acceptanceCriteria", []):
+        criteria_id = criteria.get("id")
+        if criteria_id:
+            feature_criteria[criteria_id] = {
+                "status": criteria.get("status", "Active"),
+                "description": criteria.get("description", "")
+            }
+    
+    print(f"🔹 Found {len(feature_criteria)} criteria in feature {feature_id}")
+    
+    # Get all test cases for this feature
+    vector_system = VectorRetrievalSystem()
+    embeddings_generator = EmbeddingsGenerator()
+    test_cases = await vector_system.retrieve_test_cases_by_feature_id(feature_id)
+    
+    print(f"🔹 Retrieved {len(test_cases)} test cases to check")
+    fixed_count = 0
+    
+    # Check each test case
+    for test_case in test_cases:
+        test_case_id = test_case.get("id")
+        criteria_metadata = test_case.get("criteriaMetadata", []) or []
+        
+        if not criteria_metadata:
+            continue
+            
+        # Check for inconsistencies
+        updated_test_case = dict(test_case)
+        new_criteria_metadata = []
+        updated = False
+        
+        for criteria in criteria_metadata:
+            criteria_id = criteria.get("criteriaId")
+            if not criteria_id:
+                continue
+                
+            # Make a copy of the criteria
+            new_criteria = dict(criteria)
+            
+            # Check if this criteria exists in the feature
+            if criteria_id in feature_criteria:
+                feature_status = feature_criteria[criteria_id]["status"]
+                test_case_status = criteria.get("status")
+                
+                # Fix null status
+                if test_case_status is None:
+                    new_criteria["status"] = feature_status
+                    updated = True
+                    print(f"🔹 Fixed null status for criteria {criteria_id} in test case {test_case_id}")
+                
+                # Fix inconsistent status
+                elif test_case_status != feature_status:
+                    if feature_status == "Deprecated" and test_case_status != "Inactive":
+                        # If deprecated in feature but not inactive in test case
+                        new_criteria["status"] = "Inactive"
+                        new_criteria["removedDate"] = datetime.now(timezone.utc).isoformat()
+                        updated = True
+                        print(f"🔹 Updated criteria {criteria_id} status from {test_case_status} to Inactive in test case {test_case_id}")
+                    elif feature_status == "Active" and test_case_status != "Active":
+                        # If active in feature but not in test case
+                        new_criteria["status"] = "Active"
+                        if "removedDate" in new_criteria:
+                            del new_criteria["removedDate"]
+                        updated = True
+                        print(f"🔹 Updated criteria {criteria_id} status from {test_case_status} to Active in test case {test_case_id}")
+            else:
+                # Criteria not in feature (might be old/removed)
+                if criteria.get("status") != "Inactive":
+                    new_criteria["status"] = "Inactive"
+                    new_criteria["removedDate"] = datetime.now(timezone.utc).isoformat()
+                    updated = True
+                    print(f"🔹 Marked orphaned criteria {criteria_id} as Inactive in test case {test_case_id}")
+            
+            new_criteria_metadata.append(new_criteria)
+        
+        # Update test case if needed
+        if updated:
+            updated_test_case["criteriaMetadata"] = new_criteria_metadata
+            
+            # Ensure featureMetadata is set
+            if "featureMetadata" in updated_test_case and updated_test_case["featureMetadata"]:
+                updated_test_case["featureMetadata"]["lastUpdated"] = datetime.now(timezone.utc).isoformat()
+            else:
+                updated_test_case["featureMetadata"] = {
+                    "featureId": feature_id,
+                    "lastUpdated": datetime.now(timezone.utc).isoformat()
+                }
+            
+            # Upload the updated test case
+            success = embeddings_generator.upload_test_case(updated_test_case)
+            if success:
+                fixed_count += 1
+                print(f"✅ Fixed criteria status in test case {test_case_id}")
+            else:
+                print(f"⚠️ Failed to update test case {test_case_id}")
+    
+    print(f"✅ Fixed criteria status in {fixed_count} test cases")
+    return fixed_count
