@@ -560,8 +560,8 @@ def get_criteria_id_map(criteria_objects):
     
     for criteria in criteria_objects:
         if criteria.get("status", "Active") == "Active":  # Only map active criteria
-            description = criteria.get("description", "").lower().strip()
-            criteria_map[description] = criteria
+            criteria_id = criteria.get("id")
+            criteria_map[criteria_id] = criteria
     
     return criteria_map
 
@@ -591,12 +591,13 @@ async def update_test_case_criteria_mappings(test_cases, criteria_map, feature_i
             description = criteria.get("description", "").lower().strip()
             
             # Try to find matching criteria in the map
-            if description in criteria_map:
-                # Update to the latest criteria
+            if criteria_id in criteria_map:
+                # Preserve status if it's "Inactive"
+                current_status = criteria.get("status")
                 updated_metadata.append({
-                    "criteriaId": criteria_map[description]["id"],
-                    "description": criteria_map[description]["description"],
-                    "status": criteria.get("status", "Active")  # Preserve existing status if present
+                    "criteriaId": criteria_map[criteria_id]["id"],
+                    "description": criteria_map[criteria_id]["description"],
+                    "status": "Inactive" if current_status == "Inactive" else criteria_map[criteria_id].get("status", "Active")
                 })
             else:
                 # Try fuzzy matching if exact match fails
