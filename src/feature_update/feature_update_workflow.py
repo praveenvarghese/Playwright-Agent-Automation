@@ -156,7 +156,11 @@ async def update_feature_workflow(feature_data):
         if not original_feature:
             print(f"⚠️ Couldn't find original feature with ID {feature_data['id']}. Will proceed as new feature.")
             return False
-        
+        print(f"🔹 Repairing feature-test case relationship before update...")
+        feature_processor = FeatureProcessor()
+        repair_result = feature_processor.repair_feature_test_case_relationship(feature_data['id'])
+        if repair_result["errors"] > 0:
+            print(f"⚠️ Some errors occurred during relationship repair, but continuing with update")
         # Step 2: Analyze acceptance criteria changes
         criteria_changes = analyze_criteria_changes(
             original_criteria=original_feature.get('acceptanceCriteria', []),
@@ -202,11 +206,17 @@ async def update_feature_workflow(feature_data):
             updated_criteria=updated_criteria_objects,
             preserve_test_cases=True
         )
-        
+
         if not feature_update_success:
             print(f"⚠️ Failed to update feature with new criteria")
             return False
-        
+
+        # Fix test cases that contain criteria from this feature but don't have feature metadata
+        if 'reactivated' in criteria_changes and criteria_changes['reactivated']:
+            reactivated_ids = [reactivated[0].get('id') for reactivated in criteria_changes['reactivated']]
+            print(f"🔹 Checking for test cases with reactivated criteria but missing feature metadata")
+            await fix_missing_feature_metadata(feature_id=feature_data['id'], criteria_ids=reactivated_ids)
+
         # Step 7a: Mark criteria as inactive in test cases that will be kept
         if removed_criteria_ids:
             await mark_deprecated_criteria_in_test_cases(
@@ -907,6 +917,10 @@ async def mark_test_case_deprecated(test_case_id, reason="Feature deprecated", r
         return False
 
 async def mark_deprecated_criteria_in_test_cases(feature_id, removed_criteria_ids, keep_test_cases=[]):
+    """
+    Explicitly mark deprecated criteria as inactive in test cases.
+    Fixed to prevent test case deletion issues.
+    """
     if not removed_criteria_ids:
         print(f"🔹 No criteria were removed, no cleanup needed")
         return 0
@@ -919,46 +933,76 @@ async def mark_deprecated_criteria_in_test_cases(feature_id, removed_criteria_id
     embeddings_generator = EmbeddingsGenerator()
     
     # Get test cases to process
-    test_cases = keep_test_cases or await vector_system.retrieve_test_cases_by_feature_id(feature_id)
+    test_cases = keep_test_cases
+    if not test_cases:
+        test_cases = await vector_system.retrieve_test_cases_by_feature_id(feature_id)
+    
+    print(f"🔹 Retrieved {len(test_cases)} test cases to process")
     updated_count = 0
     
     for test_case in test_cases:
         test_case_id = test_case.get("id")
         criteria_metadata = test_case.get("criteriaMetadata", []) or []
         
-        # Check if this test case references any removed criteria
+        if not criteria_metadata:
+            continue
+            
+        # Debug output to help identify issues
+        print(f"🔹 Processing test case {test_case_id} with {len(criteria_metadata)} criteria references")
+        
+        # Create a new criteria metadata list instead of modifying in-place
+        new_criteria_metadata = []
         updated = False
+        
         for criteria in criteria_metadata:
-            if criteria.get("criteriaId") in removed_criteria_ids:
+            criteria_id = criteria.get("criteriaId")
+            description = criteria.get("description", "")
+            current_status = criteria.get("status", "Active")  # Default to Active if null
+            
+            # Create a copy of the criteria to avoid reference issues
+            new_criteria = dict(criteria)
+            
+            # If this is a criteria that needs to be marked inactive
+            if criteria_id in removed_criteria_ids:
                 # Only update if not already inactive
-                if criteria.get("status") != "Inactive":
-                    # STRICT SCHEMA: Only use these exact fields
-                    new_criteria = {
-                        "criteriaId": criteria.get("criteriaId"),
-                        "description": criteria.get("description", ""),
-                        "status": "Inactive",
-                        "removedDate": datetime.now(timezone.utc).isoformat()
-                    }
-                    
-                    # Replace the criteria with the new one
-                    criteria.clear()
-                    criteria.update(new_criteria)
+                if current_status != "Inactive":
+                    # Update status and add removedDate
+                    new_criteria["status"] = "Inactive"
+                    new_criteria["removedDate"] = datetime.now(timezone.utc).isoformat()
                     updated = True
-                    print(f"🔹 Marked criteria {criteria.get('criteriaId')} as inactive in test case {test_case_id}")
+                    print(f"🔹 Marked criteria {criteria_id} as inactive in test case {test_case_id}")
+            
+            # Add the criteria to the new list
+            new_criteria_metadata.append(new_criteria)
         
         # If criteria were marked as inactive, update the test case
         if updated:
+            # Make a complete copy of the test case
+            updated_test_case = dict(test_case)
+            
+            # Update the criteria metadata with our new list
+            updated_test_case["criteriaMetadata"] = new_criteria_metadata
+            
             # Update the test case timestamp
-            if "featureMetadata" in test_case:
-                test_case["featureMetadata"]["lastUpdated"] = datetime.now(timezone.utc).isoformat()
+            if "featureMetadata" in updated_test_case:
+                updated_test_case["featureMetadata"]["lastUpdated"] = datetime.now(timezone.utc).isoformat()
+            
+            # Verify all required fields are present
+            for required_field in ["title", "steps", "expectedResults"]:
+                if not updated_test_case.get(required_field):
+                    print(f"⚠️ Test case {test_case_id} is missing required field: {required_field}")
+                    print(f"   Original: {test_case.get(required_field)}")
+                    print(f"   Updated: {updated_test_case.get(required_field)}")
             
             # Upload the updated test case
-            success = embeddings_generator.upload_test_case(test_case)
+            success = embeddings_generator.upload_test_case(updated_test_case)
             if success:
                 updated_count += 1
                 print(f"✅ Successfully updated test case {test_case_id}")
             else:
                 print(f"⚠️ Failed to update test case {test_case_id}")
+                # Try to print more details about the test case
+                print(f"   Fields: {', '.join(updated_test_case.keys())}")
     
     print(f"✅ Marked deprecated criteria as inactive in {updated_count} test cases")
     return updated_count
@@ -1119,3 +1163,107 @@ async def archive_test_cases(feature_id, reason="Feature archived"):
     
     print_success(f"Archived {archived_count} test cases for feature {feature_id}")
     return archived_count
+
+async def fix_missing_feature_metadata(feature_id, criteria_ids=None):
+    """
+    Fix test cases that are missing feature metadata but contain specific criteria.
+    Enhanced with additional safeguards to prevent data loss.
+    
+    Args:
+        feature_id (str): The feature ID to associate with test cases
+        criteria_ids (list): Optional list of criteria IDs to look for (if None, fixes all test cases)
+        
+    Returns:
+        int: Number of test cases updated
+    """
+    print(f"🔹 Looking for test cases with missing feature metadata that should be associated with {feature_id}")
+    
+    # Initialize embeddings generator
+    embeddings_generator = EmbeddingsGenerator()
+    
+    # Search for all test cases
+    try:
+        # Since we can't filter by featureMetadata (it's null), we search all test cases
+        all_results = list(embeddings_generator.search_client.search(
+            search_text="*",  # Search all
+            filter="",  # No filter
+            select=["*"],  # Select ALL fields to ensure we have everything
+            top=1000  # Adjust as needed
+        ))
+        
+        print(f"🔹 Found {len(all_results)} total test cases to check")
+        
+        # Track updated test cases
+        updated_count = 0
+        
+        # Filter test cases that need updating
+        for test_case in all_results:
+            test_case_id = test_case.get("id")
+            criteria_metadata = test_case.get("criteriaMetadata", []) or []
+            feature_metadata = test_case.get("featureMetadata")
+            
+            # Create a complete copy of the test case to avoid reference issues
+            updated_test_case = dict(test_case)
+            
+            # Check if this test case should be updated
+            should_update = False
+            
+            # Check if feature metadata is missing or incorrect
+            if feature_metadata is None or not feature_metadata.get("featureId"):
+                if criteria_ids:
+                    # Only update if it contains any of the specified criteria
+                    for criteria in criteria_metadata:
+                        if criteria.get("criteriaId") in criteria_ids:
+                            should_update = True
+                            print(f"🔹 Test case {test_case_id} has criteria {criteria.get('criteriaId')} but missing feature metadata")
+                            break
+                else:
+                    # Update all test cases with missing feature metadata
+                    should_update = True
+                    print(f"🔹 Test case {test_case_id} has missing feature metadata")
+            
+            # Update the test case if needed
+            if should_update:
+                print(f"🔹 Updating test case {test_case_id} with feature metadata for {feature_id}")
+                
+                # Only modify the featureMetadata field, leave everything else untouched
+                updated_test_case["featureMetadata"] = {
+                    "featureId": feature_id,
+                    "lastUpdated": datetime.now(timezone.utc).isoformat()
+                }
+                
+                # Verify all required fields are present before uploading
+                required_fields = ["id", "title", "steps", "expectedResults"]
+                missing_fields = [field for field in required_fields if not updated_test_case.get(field)]
+                
+                if missing_fields:
+                    print(f"⚠️ Test case {test_case_id} is missing required fields: {', '.join(missing_fields)}")
+                    continue
+                
+                # Print the test case before uploading (for debugging)
+                print(f"🔹 About to update test case {test_case_id} with fields:")
+                for key in updated_test_case:
+                    if key != "vector":  # Skip the vector field which is large
+                        print(f"   - {key}: {type(updated_test_case[key])}")
+                
+                # Upload the updated test case
+                try:
+                    success = embeddings_generator.upload_test_case(updated_test_case)
+                    
+                    if success:
+                        updated_count += 1
+                        print(f"✅ Successfully updated test case {test_case_id} with feature metadata")
+                    else:
+                        print(f"⚠️ Failed to update test case {test_case_id}")
+                except Exception as e:
+                    print(f"❌ Error updating test case {test_case_id}: {str(e)}")
+        
+        print(f"✅ Updated feature metadata for {updated_count} test cases")
+        return updated_count
+        
+    except Exception as e:
+        print(f"❌ Error fixing feature metadata: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return 0
+    

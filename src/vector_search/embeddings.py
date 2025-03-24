@@ -296,17 +296,14 @@ class EmbeddingsGenerator:
             
             if not test_case.get("status"):
                 test_case["status"] = "Active"
-                
+                    
             if not test_case.get("version"):
                 test_case["version"] = "1.0"
 
             for field_to_remove in ["lastUpdated", "notes", "statusReason", "archivedDate"]:
                 if field_to_remove in test_case:
                     del test_case[field_to_remove]
-                
-            # if not test_case.get("notes"):
-            #     test_case["notes"] = ""
-            
+                    
             # Extract content to generate embedding
             content_for_embedding = f"{test_case.get('title', '')} {test_case.get('steps', '')} {test_case.get('expectedResults', '')}"
             
@@ -331,7 +328,7 @@ class EmbeddingsGenerator:
         except Exception as e:
             print(f"Unexpected error in upload_test_case: {str(e)}")
             return False
-        
+       
     def search_similar_test_cases(self, query_text, top=3):
             try:
                 # Generate query embedding

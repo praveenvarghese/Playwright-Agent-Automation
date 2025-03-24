@@ -110,6 +110,7 @@ class FeatureProcessor:
     def update_feature_test_cases(self, feature_id, test_case_ids):
         """
         Update the list of test case IDs associated with a feature.
+        Enhanced to maintain bidirectional relationship.
         
         Args:
             feature_id (str): The feature ID
@@ -158,13 +159,52 @@ class FeatureProcessor:
             # Upload the complete document with updates
             self.search_client.upload_documents(documents=[update_doc])
             
-            print(f"Successfully updated feature {feature_id} with {len(test_cases_to_add)} new test cases (total: {len(updated_test_case_ids)})")
-            return True
+            # Now update the test cases to ensure bidirectional relationship
+            if test_cases_to_add:
+                from src.vector_search.embeddings import EmbeddingsGenerator
+                embeddings_generator = EmbeddingsGenerator()
+                updated_tc_count = 0
+                
+                for test_case_id in test_cases_to_add:
+                    try:
+                        # Get the test case
+                        tc_results = list(embeddings_generator.search_client.search(
+                            search_text="",
+                            filter=f"id eq '{test_case_id}'",
+                            select=["*"]
+                        ))
+                        
+                        if not tc_results:
+                            print(f"⚠️ Test case {test_case_id} referenced by feature but not found")
+                            continue
+                            
+                        test_case = dict(tc_results[0])
+                        
+                        # Ensure feature metadata is set
+                        test_case["featureMetadata"] = {
+                            "featureId": feature_id,
+                            "lastUpdated": datetime.now(timezone.utc).isoformat()
+                        }
+                        
+                        # Upload the updated test case
+                        success = embeddings_generator.upload_test_case(test_case)
+                        if success:
+                            updated_tc_count += 1
+                        else:
+                            print(f"⚠️ Failed to update feature metadata for test case {test_case_id}")
+                            
+                    except Exception as tc_e:
+                        print(f"⚠️ Error updating test case {test_case_id}: {str(tc_e)}")
+                
+                print(f"✅ Updated {updated_tc_count}/{len(test_cases_to_add)} test cases with feature metadata")
             
+            print(f"✅ Successfully updated feature {feature_id} with {len(test_cases_to_add)} new test cases (total: {len(updated_test_case_ids)})")
+            return True
+                
         except Exception as e:
-            print(f"Error updating feature test cases: {str(e)}")
+            print(f"❌ Error updating feature test cases: {str(e)}")
             return False
-    
+     
     def _extract_domain_code(self, title, description):
         """Extract a domain code from the title or description."""
         # Dictionary of domain keywords to codes
@@ -419,16 +459,73 @@ class FeatureProcessor:
     def update_feature_with_criteria(self, feature_id, feature_data, updated_criteria, preserve_test_cases=True):
         """
         Update a feature with new criteria while preserving test case links and deprecated criteria.
+        Enhanced to explicitly preserve test case IDs regardless of preserve_test_cases parameter.
+        
+        Args:
+            feature_id (str): The feature ID
+            feature_data (dict): New feature data
+            updated_criteria (list): Updated criteria objects
+            preserve_test_cases (bool): Whether to preserve test case links
+            
+        Returns:
+            bool: True if successful, False otherwise
         """
         try:
-            # Get existing test case IDs if preserving
+            # Always get existing test case IDs, regardless of preserve_test_cases parameter
             existing_test_case_ids = []
-            if preserve_test_cases:
-                existing_test_case_ids = self.get_existing_test_case_ids(feature_id)
+            
+            # Get the current feature document directly instead of using get_existing_test_case_ids
+            # This is more reliable as we get the complete document
+            feature_results = list(self.search_client.search(
+                search_text="",
+                filter=f"id eq '{feature_id}'",
+                select=["*"]  # Select all fields to ensure we get everything
+            ))
+            
+            if feature_results:
+                original_feature = dict(feature_results[0])
+                # Get test case IDs from the original feature
+                original_test_case_ids = original_feature.get("testCaseIds", []) or []
+                
+                if original_test_case_ids:
+                    print(f"🔹 Found {len(original_test_case_ids)} existing test case IDs in feature: {feature_id}")
+                    existing_test_case_ids = original_test_case_ids
+                else:
+                    print(f"⚠️ No existing test case IDs found in feature: {feature_id}")
+                    
+                    # If no test case IDs in the feature, try to find them by searching test cases
+                    # that reference this feature
+                    print(f"🔹 Attempting to recover test case IDs by searching test cases...")
+                    
+                    # Initialize embeddings generator to search for test cases
+                    from src.vector_search.embeddings import EmbeddingsGenerator
+                    embeddings_generator = EmbeddingsGenerator()
+                    
+                    try:
+                        # Search for test cases that reference this feature
+                        tc_results = list(embeddings_generator.search_client.search(
+                            search_text="*",
+                            filter=f"featureMetadata/featureId eq '{feature_id}'",
+                            select=["id"],
+                            top=1000
+                        ))
+                        
+                        if tc_results:
+                            # Extract test case IDs
+                            recovered_ids = [tc.get("id") for tc in tc_results]
+                            print(f"🔹 Recovered {len(recovered_ids)} test case IDs from test cases")
+                            existing_test_case_ids = recovered_ids
+                        else:
+                            print(f"⚠️ No test cases found referencing feature: {feature_id}")
+                    except Exception as search_e:
+                        print(f"⚠️ Error searching for test cases: {str(search_e)}")
+            else:
+                print(f"⚠️ Feature {feature_id} not found in search index")
             
             # Debug logging
             deprecated_count = sum(1 for c in updated_criteria if c.get('status') == 'Deprecated')
             print(f"🔹 Updating feature {feature_id} with {len(updated_criteria)} criteria objects, including {deprecated_count} deprecated")
+            print(f"🔹 Preserving {len(existing_test_case_ids)} test case IDs")
                 
             # Prepare document for Cognitive Search - include ALL criteria
             search_doc = {
@@ -451,22 +548,33 @@ class FeatureProcessor:
             # Upload to Azure Cognitive Search
             try:
                 self.search_client.upload_documents(documents=[search_doc])
-                print(f"✅ Successfully updated feature: {feature_id} with {len(updated_criteria)} criteria")
+                print(f"✅ Successfully updated feature: {feature_id} with {len(updated_criteria)} criteria and {len(existing_test_case_ids)} test case IDs")
                 
-                # Verify update was successful
-                # This would fetch the document again to confirm deprecated criteria were stored
+                # Verify update by retrieving the feature again
+                verify_results = list(self.search_client.search(
+                    search_text="",
+                    filter=f"id eq '{feature_id}'",
+                    select=["testCaseIds"]
+                ))
+                
+                if verify_results and verify_results[0].get("testCaseIds"):
+                    print(f"✅ Verified update: feature now has {len(verify_results[0].get('testCaseIds'))} test case IDs")
+                else:
+                    print(f"⚠️ Warning: Feature update verification failed - testCaseIds still appears empty")
+                    
                 return True
             except Exception as e:
                 print(f"⚠️ Error during database update: {str(e)}")
                 return False
-                
+                    
         except Exception as e:
             print(f"⚠️ Error updating feature: {str(e)}")
             return False
-    
+        
     def get_existing_test_case_ids(self, feature_id):
         """
         Get existing test case IDs for a feature.
+        Enhanced to be more robust by trying multiple approaches.
         
         Args:
             feature_id (str): The feature ID
@@ -475,20 +583,51 @@ class FeatureProcessor:
             list: List of test case IDs
         """
         try:
+            print(f"🔹 Retrieving existing test case IDs for feature: {feature_id}")
+            
+            # First attempt: Direct search with ID filter
             results = list(self.search_client.search(
                 search_text="",
                 filter=f"id eq '{feature_id}'",
                 select=["testCaseIds"]
             ))
             
-            if results and results[0].get("testCaseIds"):
-                return results[0].get("testCaseIds")
+            if results and results[0].get("testCaseIds") and len(results[0].get("testCaseIds")) > 0:
+                test_case_ids = results[0].get("testCaseIds")
+                print(f"🔹 Found {len(test_case_ids)} test case IDs directly in feature")
+                return test_case_ids
+            
+            print(f"⚠️ No test case IDs found directly in feature, attempting recovery...")
+            
+            # Second attempt: Look up test cases that reference this feature
+            from src.vector_search.embeddings import EmbeddingsGenerator
+            embeddings_generator = EmbeddingsGenerator()
+            
+            try:
+                # Search for test cases that reference this feature
+                tc_results = list(embeddings_generator.search_client.search(
+                    search_text="*",
+                    filter=f"featureMetadata/featureId eq '{feature_id}'",
+                    select=["id"],
+                    top=1000
+                ))
+                
+                if tc_results:
+                    # Extract test case IDs
+                    recovered_ids = [tc.get("id") for tc in tc_results]
+                    print(f"🔹 Recovered {len(recovered_ids)} test case IDs from test cases")
+                    return recovered_ids
+            except Exception as search_e:
+                print(f"⚠️ Error in recovery search: {str(search_e)}")
+            
+            # If all attempts fail, return empty list
+            print(f"⚠️ Could not recover any test case IDs for feature {feature_id}")
             return []
         
         except Exception as e:
-            print(f"Error getting test case IDs: {str(e)}")
+            print(f"⚠️ Error getting test case IDs: {str(e)}")
             return []
-
+    
     def merge_acceptance_criteria(self, original_criteria, updated_criteria):
         """
         Merge original and updated acceptance criteria intelligently.
@@ -519,16 +658,185 @@ class FeatureProcessor:
         
         return result
 
-# Example usage
-if __name__ == "__main__":
-    processor = FeatureProcessor()
+    def repair_feature_test_case_relationship(self, feature_id):
+        """
+        Repair the bidirectional relationship between a feature and its test cases.
+        This function ensures that:
+        1. All test cases with this feature's ID in featureMetadata are included in the feature's testCaseIds
+        2. All test cases in the feature's testCaseIds have proper featureMetadata
+        
+        Args:
+            feature_id (str): The feature ID to repair relationships for
+            
+        Returns:
+            dict: Summary of repairs made
+        """
+        print(f"🔹 Repairing feature-test case relationship for feature {feature_id}")
+        
+        # Initialize results
+        results = {
+            "feature_updated": False,
+            "test_cases_updated": 0,
+            "added_to_feature": 0,
+            "added_to_test_cases": 0,
+            "errors": 0
+        }
+        
+        try:
+            # Step 1: Get the feature document
+            feature_results = list(self.search_client.search(
+                search_text="",
+                filter=f"id eq '{feature_id}'",
+                select=["*"]
+            ))
+            
+            if not feature_results:
+                print(f"❌ Feature {feature_id} not found")
+                results["errors"] += 1
+                return results
+                
+            feature_doc = dict(feature_results[0])
+            
+            # Get current test case IDs from feature (may be empty)
+            feature_test_case_ids = feature_doc.get("testCaseIds", []) or []
+            print(f"🔹 Feature {feature_id} currently references {len(feature_test_case_ids)} test cases")
+            
+            # Step 2: Find all test cases that reference this feature
+            from src.vector_search.embeddings import EmbeddingsGenerator
+            embeddings_generator = EmbeddingsGenerator()
+            
+            try:
+                # Search for test cases that reference this feature
+                referenced_test_cases = list(embeddings_generator.search_client.search(
+                    search_text="*",
+                    filter=f"featureMetadata/featureId eq '{feature_id}'",
+                    select=["id", "title", "featureMetadata"],
+                    top=1000
+                ))
+                
+                referenced_test_case_ids = [tc.get("id") for tc in referenced_test_cases]
+                print(f"🔹 Found {len(referenced_test_case_ids)} test cases referencing feature {feature_id}")
+                
+                # Step 3: Find test cases that should reference the feature based on criteria
+                # This is useful for recovering lost relationships
+                acceptance_criteria_ids = [c.get("id") for c in feature_doc.get("acceptanceCriteria", [])]
+                
+                # Build a filter to find test cases with matching criteria
+                criteria_filter = " or ".join([f"criteriaMetadata/any(c: c/criteriaId eq '{cid}')" for cid in acceptance_criteria_ids])
+                
+                if criteria_filter:
+                    # Search for test cases with matching criteria
+                    criteria_matching_test_cases = list(embeddings_generator.search_client.search(
+                        search_text="*",
+                        filter=criteria_filter,
+                        select=["id", "title", "featureMetadata", "criteriaMetadata"],
+                        top=1000
+                    ))
+                    
+                    # Filter out test cases that already reference this feature
+                    criteria_matching_ids = []
+                    for tc in criteria_matching_test_cases:
+                        tc_id = tc.get("id")
+                        feature_metadata = tc.get("featureMetadata")
+                        
+                        # Only include test cases that don't already have the feature metadata
+                        if not feature_metadata or feature_metadata.get("featureId") != feature_id:
+                            criteria_matching_ids.append(tc_id)
+                    
+                    print(f"🔹 Found {len(criteria_matching_ids)} additional test cases with matching criteria")
+                    
+                    # Combine with referenced test cases
+                    all_related_test_case_ids = set(referenced_test_case_ids + criteria_matching_ids)
+                else:
+                    all_related_test_case_ids = set(referenced_test_case_ids)
+                
+                # Step 4: Update feature's testCaseIds if needed
+                # Find test cases that should be added to feature
+                test_case_ids_to_add = all_related_test_case_ids - set(feature_test_case_ids)
+                
+                if test_case_ids_to_add:
+                    # Update feature's testCaseIds
+                    updated_test_case_ids = list(set(feature_test_case_ids) | all_related_test_case_ids)
+                    
+                    # Create a document update with required fields
+                    feature_update = dict(feature_doc)  # Start with a copy
+                    feature_update["testCaseIds"] = updated_test_case_ids
+                    feature_update["lastUpdated"] = datetime.now(timezone.utc).isoformat()
+                    
+                    # Upload the updated feature
+                    self.search_client.upload_documents(documents=[feature_update])
+                    
+                    print(f"✅ Updated feature {feature_id} with {len(test_case_ids_to_add)} additional test cases")
+                    results["feature_updated"] = True
+                    results["added_to_feature"] = len(test_case_ids_to_add)
+                
+                # Step 5: Ensure all test cases have proper featureMetadata
+                # Combine feature's test case IDs with those we found
+                all_test_case_ids = set(updated_test_case_ids if test_case_ids_to_add else feature_test_case_ids)
+                
+                for test_case_id in all_test_case_ids:
+                    try:
+                        # Get the test case
+                        tc_results = list(embeddings_generator.search_client.search(
+                            search_text="",
+                            filter=f"id eq '{test_case_id}'",
+                            select=["*"]
+                        ))
+                        
+                        if not tc_results:
+                            print(f"⚠️ Test case {test_case_id} not found")
+                            continue
+                            
+                        test_case = dict(tc_results[0])
+                        
+                        # Check if feature metadata needs updating
+                        feature_metadata = test_case.get("featureMetadata")
+                        needs_update = False
+                        
+                        if not feature_metadata or feature_metadata.get("featureId") != feature_id:
+                            # Update feature metadata
+                            test_case["featureMetadata"] = {
+                                "featureId": feature_id,
+                                "lastUpdated": datetime.now(timezone.utc).isoformat()
+                            }
+                            needs_update = True
+                            results["added_to_test_cases"] += 1
+                        
+                        # Also fix any null status values in criteria
+                        criteria_metadata = test_case.get("criteriaMetadata", []) or []
+                        for criteria in criteria_metadata:
+                            if criteria.get("status") is None:
+                                criteria["status"] = "Active"
+                                needs_update = True
+                        
+                        if needs_update:
+                            # Upload the updated test case
+                            success = embeddings_generator.upload_test_case(test_case)
+                            if success:
+                                results["test_cases_updated"] += 1
+                                print(f"✅ Updated test case {test_case_id} with proper feature metadata")
+                            else:
+                                results["errors"] += 1
+                                print(f"❌ Failed to update test case {test_case_id}")
+                    
+                    except Exception as tc_e:
+                        results["errors"] += 1
+                        print(f"❌ Error updating test case {test_case_id}: {str(tc_e)}")
+                
+                print(f"✅ Relationship repair completed for feature {feature_id}")
+                print(f"   - Added {results['added_to_feature']} test cases to feature")
+                print(f"   - Updated {results['test_cases_updated']} test cases with proper metadata")
+                print(f"   - Encountered {results['errors']} errors")
+                
+                return results
+                    
+            except Exception as search_e:
+                results["errors"] += 1
+                print(f"❌ Error searching for test cases: {str(search_e)}")
+                return results
+                
+        except Exception as e:
+            results["errors"] += 1
+            print(f"❌ Error repairing relationship: {str(e)}")
+            return results
     
-    # Example file path
-    feature_file = os.path.join(processor.REQUIREMENTS_DIR, "feature_requirement.txt")
-    
-    if os.path.exists(feature_file):
-        result = processor.process_and_store_feature_file(feature_file)
-        if result:
-            print(f"Feature processed successfully with ID: {result['id']}")
-    else:
-        print(f"Feature file not found: {feature_file}")
