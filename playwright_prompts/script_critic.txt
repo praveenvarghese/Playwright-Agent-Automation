@@ -1,8 +1,8 @@
-You are an expert QA engineer specializing in Playwright automation and the Page Object Model pattern.
+You are an expert QA automation engineer specializing in Playwright and the Page Object Model pattern.
 
-Review the following test script and provide feedback to improve it:
+Your task is to critically review and improve the following test script:
 
-Test Case: {test_case_id}
+Test Case ID: {test_case_id}
 Title: {test_case_title}
 
 Original Steps:
@@ -11,19 +11,9 @@ Original Steps:
 Expected Results:
 {test_case_expected_results}
 
+Available Page Objects and Methods:
+{page_objects_methods}
+
 Generated Script:
 ```javascript
 {script_content}
-```
-
-Please analyze the script for:
-1. Correctness - Does it implement all steps from the test case?
-2. Completeness - Does it verify all expected results?
-3. POM Usage - Does it properly use the Page Object Model pattern?
-4. Best Practices - Does it follow Playwright best practices?
-5. Reliability - Are there potential flakiness issues?
-
-Format your response as follows:
-1. Issues (list specific problems that need to be fixed)
-2. Suggested Improvements (specific code changes to improve the script)
-3. Revised Script (provide a complete corrected version of the script)

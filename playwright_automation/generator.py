@@ -203,10 +203,9 @@ async def generate_test_script_content(test_case, page_objects, feature_data):
     script_content = await generate_test_script(test_case, page_objects, feature_data)
     
     # Review and improve the script
-    improved_script = await improve_script(test_case, script_content)
+    improved_script = await improve_script(test_case, script_content, page_objects)
     
     return improved_script
-
 
 def generate_fallback_script(test_case):
     """Generate a basic fallback script if AI generation fails."""

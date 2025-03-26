@@ -7,19 +7,20 @@ import os
 from .prompts import _load_prompt_template
 from .utils import format_console_output
 
-
-async def review_test_script(test_case, script_content):
+async def review_test_script(test_case, script_content, page_objects):
     """
     Review a generated test script using AI.
     
     Args:
         test_case (dict): The test case data
         script_content (str): The generated script content
+        page_objects (list): List of page object names
         
     Returns:
         dict: Analysis results with suggested improvements
     """
     from config.config import TestCaseCritic
+    from .utils import format_console_output, get_page_object_methods
     
     # Get the prompt template
     template = _load_prompt_template("script_critic.txt")
@@ -30,12 +31,16 @@ async def review_test_script(test_case, script_content):
     test_case_steps = test_case.get('steps', 'No steps available')
     test_case_expected_results = test_case.get('expectedResults', 'No expected results available')
     
+    # Get page object methods
+    page_objects_methods = get_page_object_methods(page_objects)
+    
     # Format the prompt
     prompt = template.format(
         test_case_id=test_case_id,
         test_case_title=test_case_title,
         test_case_steps=test_case_steps,
         test_case_expected_results=test_case_expected_results,
+        page_objects_methods=page_objects_methods,
         script_content=script_content
     )
     
@@ -58,15 +63,15 @@ async def review_test_script(test_case, script_content):
         issues = []
         improvements = []
         
-        issues_match = re.search(r'Issues[:\n]+([\s\S]+?)(?=\n\d+\.|\Z)', response)
+        issues_match = re.search(r'Issues Found[:\n]+([\s\S]+?)(?=\n##|\Z)', response)
         if issues_match:
             issues_text = issues_match.group(1).strip()
-            issues = [issue.strip() for issue in issues_text.split('\n-') if issue.strip()]
+            issues = [issue.strip() for issue in issues_text.split('\n') if issue.strip()]
         
-        improvements_match = re.search(r'Suggested Improvements[:\n]+([\s\S]+?)(?=\n\d+\.|\Z)', response)
+        improvements_match = re.search(r'Suggested Improvements[:\n]+([\s\S]+?)(?=\n##|\Z)', response)
         if improvements_match:
             improvements_text = improvements_match.group(1).strip()
-            improvements = [imp.strip() for imp in improvements_text.split('\n-') if imp.strip()]
+            improvements = [imp.strip() for imp in improvements_text.split('\n') if imp.strip()]
         
         # Prepare result
         result = {
@@ -90,20 +95,20 @@ async def review_test_script(test_case, script_content):
             "original_script": script_content
         }
 
-
-async def improve_script(test_case, script_content):
+async def improve_script(test_case, script_content, page_objects):
     """
     Send a script for review and return the improved version.
     
     Args:
         test_case (dict): The test case data
         script_content (str): The generated script content
+        page_objects (list): The page objects used in the test
         
     Returns:
         str: Improved script content
     """
     # Review the script
-    review_result = await review_test_script(test_case, script_content)
+    review_result = await review_test_script(test_case, script_content, page_objects)
     
     # Check if there are issues
     if review_result["has_issues"]:

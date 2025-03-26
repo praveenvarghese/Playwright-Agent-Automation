@@ -189,6 +189,46 @@ module.exports = defineConfig({
         print(f"Error creating Playwright config: {str(e)}")
         return False
 
+def get_page_object_methods(page_objects):
+    """
+    Extract all available methods from the page objects.
+    
+    Args:
+        page_objects (list): List of page object names
+        
+    Returns:
+        str: Formatted string listing all available methods for each page object
+    """
+    import os
+    import re
+
+    pages_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "playwright_tests", "pages"))
+    methods_text = []
+    
+    for page_name in page_objects:
+        page_path = os.path.join(pages_dir, f"{page_name}.js")
+        if os.path.exists(page_path):
+            methods = []
+            try:
+                with open(page_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                
+                # Extract methods using regex
+                method_matches = re.finditer(r'async\s+(\w+)\s*\([^)]*\)\s*\{', content)
+                for match in method_matches:
+                    method_name = match.group(1)
+                    if method_name != 'constructor':
+                        # Try to extract parameters
+                        params_match = re.search(r'async\s+' + method_name + r'\s*\(([^)]*)\)', content)
+                        params = params_match.group(1).strip() if params_match else ""
+                        methods.append(f"{method_name}({params})")
+            
+            except Exception as e:
+                methods.append(f"Error extracting methods: {str(e)}")
+            
+            methods_text.append(f"## {page_name}\n" + "\n".join([f"- {m}" for m in methods]))
+    
+    return "\n\n".join(methods_text)
 
 def get_page_objects():
     """
