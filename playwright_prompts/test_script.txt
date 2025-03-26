@@ -1,0 +1,47 @@
+You are an expert in Playwright test automation using the Page Object Model pattern.
+
+Your task is to create a Playwright test script for the following test case:
+
+Test Case ID: {test_case_id}
+Title: {test_case_title}
+
+Steps:
+{test_case_steps}
+
+Expected Results:
+{test_case_expected_results}
+
+Generate a complete Playwright test script that:
+1. Follows the Page Object Model pattern
+2. Uses the following page objects: {page_objects}
+3. Implements all the test steps
+4. Includes proper assertions for the expected results
+5. Follows Playwright best practices
+6. Includes comments explaining key steps
+
+Each test should import the necessary page objects and use them to interact with the application. Use the page object methods wherever possible rather than directly interacting with elements on the page.
+
+Remember these key Playwright practices:
+- Use `await expect().toBeVisible()` for checking element visibility
+- Use `await expect().toHaveText()` for text validation
+- Always initialize page objects in the test
+- Add descriptive comments explaining why, not what the test is doing
+
+Return only the JavaScript code for the test, formatted as follows:
+
+```javascript
+// {test_case_id}: {test_case_title}
+const {{ test, expect }} = require('@playwright/test');
+// Import page objects
+const {{ PageName }} = require('../pages/PageName');
+
+test('{test_case_title}', async ({{ page }}) => {{
+    // Initialize page objects
+    const pageObj = new PageName(page);
+    
+    // Implement test steps
+    await pageObj.someMethod();
+    
+    // Assert expected results
+    await expect(page.locator('selector')).toBeVisible();
+}});
