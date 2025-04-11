@@ -2,10 +2,10 @@
   "features": {
     "Environment Management System": {
       "id": "FEAT-ENV-001",
-      "latest_version": 6,
+      "latest_version": 7,
       "status": "active",
       "created": "2025-03-22T23:35:58.459842+00:00",
-      "updated": "2025-03-23T15:40:36.920759+00:00"
+      "updated": "2025-04-10T17:29:41.535127+00:00"
     }
   },
   "domain_counters": {
