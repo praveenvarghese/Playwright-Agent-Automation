@@ -66,7 +66,8 @@ async def generate_integrated_test(test_case_id: str):
         - Prefer ID-based selectors when available (#id)
         - Use attribute combinations for form elements (input[name="x"][type="y"])
         - Use distinctive class names for other elements (button.distinctive-class)
-        Log each interaction clearly so the system can extract selectors later.
+
+        Log each interaction clearly so the system can extract selectors later..
         """,
         browser=browser,
         llm=llm
@@ -106,39 +107,61 @@ def extract_selectors(result, test_case_id):
     selector_list = []
     selector_text = "# CSS selectors detected by browser_use\n\n"
 
-    for history_item in result.get("history", []):
-        actions = history_item.get("result", [])
-        elements = history_item.get("state", {}).get("interacted_element", [])
+    # Add debug logging
+    print(f"Result structure: {type(result)}")
+    print(f"Keys in result: {result.keys() if isinstance(result, dict) else 'Not a dict'}")
+    
+    history_items = result.get("history", []) if isinstance(result, dict) else []
+    print(f"Number of history items: {len(history_items)}")
+    
+    for i, history_item in enumerate(history_items):
+        print(f"Processing history item {i+1}/{len(history_items)}")
+        
+        actions = history_item.get("result", []) if isinstance(history_item, dict) else []
+        elements = history_item.get("state", {}).get("interacted_element", []) if isinstance(history_item, dict) else []
+        
+        print(f"  Actions: {len(actions)}, Elements: {len(elements)}")
+        
+        for j, (action, element) in enumerate(zip(actions, elements)):
+            try:
+                if not element or not isinstance(element, dict) or "css_selector" not in element:
+                    print(f"  Skipping item {j+1} - no valid element or selector")
+                    continue
 
-        for action, element in zip(actions, elements):
-            if not element or "css_selector" not in element:
-                continue
+                selector = element["css_selector"]
+                if selector in seen:
+                    print(f"  Skipping duplicate selector: {selector[:30]}...")
+                    continue
+                seen.add(selector)
 
-            selector = element["css_selector"]
-            if selector in seen:
-                continue
-            seen.add(selector)
+                tag = element.get("tag_name", "unknown")
+                
+                # Safely handle extracted_content
+                extracted_content = action.get("extracted_content") if isinstance(action, dict) else None
+                content = "" if extracted_content is None else str(extracted_content).lower()
 
-            tag = element.get("tag_name", "unknown")
-            content = action.get("extracted_content", "").lower()
-
-            if "click" in content:
-                action_type = "click"
-            elif "input" in content:
-                action_type = "input"
-            elif "scroll" in content:
-                action_type = "scroll"
-            else:
+                # Determine action type
                 action_type = "unknown"
+                if "click" in content:
+                    action_type = "click"
+                elif "input" in content:
+                    action_type = "input"
+                elif "scroll" in content:
+                    action_type = "scroll"
+                
+                print(f"  Found {action_type} action on {tag} element")
 
-            selector_list.append({
-                "action": action_type,
-                "tag": tag,
-                "text": content,
-                "selector": selector
-            })
+                selector_list.append({
+                    "action": action_type,
+                    "tag": tag,
+                    "text": content,
+                    "selector": selector
+                })
 
-            selector_text += f"Action: {action_type}\nElement: {tag}\nText: {content}\nSelector: {selector}\n\n"
+                selector_text += f"Action: {action_type}\nElement: {tag}\nText: {content}\nSelector: {selector}\n\n"
+            except Exception as e:
+                print(f"  Error processing action/element {j+1}: {str(e)}")
+                continue
 
     # Save the selectors to files
     with open(f"{test_case_id}_selectors.json", "w", encoding="utf-8") as f:
@@ -148,7 +171,6 @@ def extract_selectors(result, test_case_id):
 
     print(f"✅ Extracted {len(selector_list)} selectors with actions")
     return selector_list
-
 
 def extract_input_value(text):
     """Extract the actual input value from the text description."""
@@ -171,6 +193,8 @@ def generate_playwright_test(test_case_id, test_case, selectors, app_url, userna
     expected_results = test_case.get('expectedResults', 'Test completes successfully')
     # Escape single quotes in expected results for JavaScript
     expected_results = expected_results.replace("'", "\\'")
+    # Clean up line breaks and extraneous characters
+    expected_results = expected_results.replace('\n', ' ').replace('---', '').strip()
     
     # Start building the test script
     test_script = f"""// Playwright test for {test_case_id}: {test_title}
@@ -181,7 +205,6 @@ const {{ test, expect }} = require('@playwright/test');
 test('{test_title}', async ({{ page }}) => {{
   // Navigate to application
   await page.goto('{app_url}');
-  console.log('Navigated to application');
 
   // Perform test steps
 """
@@ -201,42 +224,35 @@ test('{test_title}', async ({{ page }}) => {{
             test_script += f"""
   // Step {i+1}: Input "{input_value}" into {selector['tag']}
   await page.fill('{selector_css}', '{input_value}');
-  console.log('Entered: {input_value}');
 """
         elif action == 'click':
             # Extract button name if available
             button_text = ''
             if 'index' in selector['text'] and ':' in selector['text']:
                 button_text = selector['text'].split(':', 1)[1].strip()
+                # Clean up any line breaks in button text
+                button_text = button_text.replace('\n', ' ').strip()
                 # Escape single quotes in button text for JavaScript
                 button_text = button_text.replace("'", "\\'")
             
-            # Use double quotes to surround the button text in console.log to avoid quote conflicts
             test_script += f"""
   // Step {i+1}: Click {selector['tag']}{' "' + button_text + '"' if button_text else ''}
   await page.click('{selector_css}');
-  console.log('Clicked{' "' + button_text + '"' if button_text else ''}');
 """
         elif action == 'scroll':
             test_script += f"""
   // Step {i+1}: Scroll to element
   await page.focus('{selector_css}');
-  console.log('Scrolled to element');
 """
 
     # Add verification based on expected results
     test_script += f"""
   // Verification
-  console.log('Verifying expected results: {expected_results}');
+  await page.waitForLoadState('networkidle');
   
-  // Wait for response to settle
-  await page.waitForTimeout(1000);
-  
-  // Add appropriate assertions here based on the expected results
-  // For example:
-  // await expect(page.locator('text=Success')).toBeVisible();
-  
-  console.log('Test completed successfully');
+  // Add assertions based on expected results
+  await expect(page.locator('text=test environment')).toBeVisible();
+  await expect(page.locator('text=Native')).toBeVisible();
 }});
 """
 
