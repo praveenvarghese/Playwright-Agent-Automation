@@ -6,7 +6,7 @@ This module defines and configures all the Autogen agents used in the system.
 import os
 import autogen
 from dotenv import load_dotenv
-from .agent_prompts import (
+from agent_prompts import (
     POM_ENGINEER_PROMPT,
     POM_REVIEWER_PROMPT,
     SCRIPT_ENGINEER_PROMPT,

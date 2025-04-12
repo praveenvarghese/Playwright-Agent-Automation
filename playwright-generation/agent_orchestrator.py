@@ -7,9 +7,9 @@ import os
 import json
 import re
 import autogen
-from .agent_config import create_agents
-from .pom_generation import extract_page_objects, save_page_objects
-from .utils import extract_code_blocks, save_file
+from agent_config import create_agents
+from pom_generation import extract_page_objects, save_page_objects
+from utils import extract_code_blocks, save_file
 
 class PlaywrightAgentOrchestrator:
     """Orchestrates the agent-based generation of enhanced Playwright tests."""
@@ -311,3 +311,77 @@ Focus on addressing the key issues raised by the reviewer.
         
         print(f"✅ Saved page objects to {self.pages_dir}")
         print(f"✅ Saved test script to {test_file_path}")
+
+    def generate_from_selectors(self, test_case_id, test_case, selectors):
+        """
+        Generate Page Object Models directly from selectors.
+        
+        Args:
+            test_case_id (str): The test case ID
+            test_case (dict): The test case data
+            selectors (list): List of selector data
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        print(f"🚀 Generating Page Object Models for {test_case_id} from selectors")
+        
+        try:
+            # First, analyze selectors to identify pages
+            pages = analyze_selectors(selectors)
+            
+            # Use AI to enhance the page objects and generate a test script
+            user_proxy = self.agents["user_proxy"]
+            pom_engineer = self.agents["pom_engineer"]
+            
+            # Prepare selectors data for agents
+            selectors_json = json.dumps(selectors, indent=2)
+            
+            # Create prompt for POM Engineer
+            prompt = f"""
+    Please create a Page Object Model for Playwright based on these selectors and test case.
+
+    Test Case ID: {test_case_id}
+    Test Case Title: {test_case.get('title', '')}
+    Test Steps: {test_case.get('steps', '')}
+    Expected Results: {test_case.get('expectedResults', '')}
+
+    Selectors Data:
+    ```json
+    {selectors_json}
+    ```
+
+    1. Create a BasePage class for common functionality
+    2. Create Page Object classes based on logical pages identified in the selectors
+    3. Create a test script that uses these Page Objects to implement the test case
+    4. Make sure to follow enterprise best practices for Playwright testing
+
+    Your output should include:
+    1. All Page Object class files (BasePage.js and any page-specific classes)
+    2. A complete test script that uses these Page Object classes
+    """
+            
+            # Start the conversation with the POM Engineer
+            chat_result = user_proxy.initiate_chat(
+                pom_engineer,
+                message=prompt,
+                max_turns=6
+            )
+            
+            # Extract page objects and test script
+            page_objects = extract_page_objects(chat_result.chat_history)
+            test_script = self._extract_test_script(chat_result.chat_history)
+            
+            # Save the results
+            if page_objects and test_script:
+                self._save_results(test_case_id, page_objects, test_script)
+                return True
+            else:
+                print(f"❌ Failed to generate Page Object Models")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error generating from selectors: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False   
