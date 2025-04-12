@@ -18,6 +18,7 @@ GENERATOR_PROMPT_FILE = os.path.join(PROMPTS_DIR, "generator_prompt.txt")
 CRITIC_PROMPT_FILE = os.path.join(PROMPTS_DIR, "critic_prompt.txt")
 RAW_GENERATOR_RESPONSE_FILE = os.path.join(LOGS_DIR, "RawGeneratorResponse.txt")
 RAW_CRITIC_RESPONSE_FILE = os.path.join(LOGS_DIR, "RawCriticResponse.txt")
+FEATURE_REQUIREMENT_FILE = os.path.join(PROMPTS_DIR, "feature_requirement.txt")
 
 async def generate_test_cases(similar_cases=None):
     """
@@ -42,12 +43,27 @@ async def generate_test_cases(similar_cases=None):
     try:
         with open(GENERATOR_PROMPT_FILE, "r", encoding="utf-8") as f:
             generator_prompt = f.read()
+
+        with open(FEATURE_REQUIREMENT_FILE, "r", encoding="utf-8") as f:
+            feature_requirement = f.read()
         
         with open(CRITIC_PROMPT_FILE, "r", encoding="utf-8") as f:
             critic_prompt = f.read()
     except FileNotFoundError as e:
         print(f"❌ Error: Prompt file not found - {e}")
         return None
+    
+    combined_prompt = f"""
+        I'll create test cases based on this feature requirement:
+
+        {feature_requirement}
+
+        Using the following template:
+
+        {generator_prompt}
+
+        Combine the feature_requirement and the generator_prompt to create a new prompt for the test case generation.
+        """
     
     # Step 2: Prepare context with similar test cases
     context = ""
@@ -61,7 +77,7 @@ async def generate_test_cases(similar_cases=None):
             context += f"Expected Results:\n{case.get('expectedResults', 'None')}\n"
     
     # Step 3: Generate Test Cases using the prompt and context
-    enhanced_prompt = generator_prompt + context
+    enhanced_prompt = combined_prompt + context
     
     if context:
         enhanced_prompt += "\n\nPlease use the reference test cases as examples for format and completeness, but create new test cases specific to the requirements above."
