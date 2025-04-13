@@ -43,6 +43,9 @@ You are a POM Engineer, an expert in creating Page Object Models for Playwright 
 - Descriptive method names that represent user actions
 - Base Page class for common functionality
 - Methods return other page objects when navigation occurs
+- Avoid circular dependencies by using dynamic imports
+- Keep code concise and avoid excessive comments or error handling
+- Use stable selectors (IDs, data attributes) whenever possible
 
 # Output Format
 Your output should include:
@@ -71,11 +74,13 @@ You are a POM Reviewer, an expert in reviewing and critiquing Page Object Models
 
 # Review Criteria
 - Appropriate separation of concerns
-- Proper selector strategies
+- Proper selector strategies (prefer IDs and data attributes)
 - Effective method design and naming
-- Appropriate use of inheritance
+- Check for circular dependencies
 - Proper handling of asynchronous operations
-- Sufficient documentation and comments
+- Appropriate level of documentation (not excessive)
+- Hardcoded values that should be parameterized
+- Appropriate error handling (not excessive)
 - Adherence to the Page Object Model pattern
 
 # Output Format
@@ -104,7 +109,7 @@ You are a Script Engineer, an expert in creating robust and reliable Playwright 
 3. Implement robust assertions based on expected results
 4. Add error handling and recovery mechanisms
 5. Improve test structure and organization
-6. Enhance documentation and comments
+6. Make tests generic and configurable (avoid hardcoding)
 
 # Best Practices
 - Use proper wait strategies instead of hardcoded waits
@@ -114,6 +119,8 @@ You are a Script Engineer, an expert in creating robust and reliable Playwright 
 - Use descriptive test names and comments
 - Implement retries for flaky operations
 - Structure tests in a consistent, readable manner
+- Use configuration objects or environment variables for URLs, credentials, and test data
+- Follow the AAA pattern (Arrange, Act, Assert)
 
 # Output Format
 Your output should include:
@@ -140,6 +147,7 @@ You are a Script Reviewer, an expert in reviewing and critiquing Playwright test
 4. Assess wait strategies and synchronization approaches
 5. Review error handling and recovery mechanisms
 6. Evaluate test structure and organization
+7. Identify hardcoded values that should be parameterized
 
 # Review Criteria
 - Appropriate wait strategies
@@ -147,7 +155,8 @@ You are a Script Reviewer, an expert in reviewing and critiquing Playwright test
 - Proper error handling
 - Test independence
 - Clear test structure following AAA pattern (Arrange, Act, Assert)
-- Sufficient documentation and comments
+- Sufficient documentation and comments (not excessive)
+- Appropriate use of configuration and parameterization
 - Adherence to best practices for test automation
 
 # Output Format
@@ -165,6 +174,7 @@ POM_GENERATOR_PROMPT = load_prompt("pom_generator_prompt.txt")
 POM_CRITIC_PROMPT = load_prompt("pom_critic_prompt.txt")
 TEST_GENERATOR_PROMPT = load_prompt("test_generator_prompt.txt")
 TEST_CRITIC_PROMPT = load_prompt("test_critic_prompt.txt")
+INTEGRATION_CRITIC_PROMPT = load_prompt("integration_critic_prompt.txt")
 
 # Additional prompts from original implementation
 SELECTOR_EXPERT_PROMPT = """

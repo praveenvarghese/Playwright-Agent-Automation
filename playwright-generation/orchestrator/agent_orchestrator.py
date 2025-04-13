@@ -11,6 +11,7 @@ from pom_generation import save_page_objects, analyze_selectors
 from utils import save_file
 from orchestrator.extraction_utils import extract_page_objects_from_coordinator, extract_test_script_from_chat
 from orchestrator.agent_specialized import generate_with_specialized_agents
+from validation import run_integration_validation
 
 class PlaywrightAgentOrchestrator:
     """Orchestrates the agent-based generation of enhanced Playwright tests."""
@@ -44,7 +45,10 @@ class PlaywrightAgentOrchestrator:
         
         print(f"✅ Saved page objects to {self.pages_dir}")
         print(f"✅ Saved test script to {test_file_path}")
-    
+        
+        # Run integration validation
+        self.validate_integration(test_case_id)
+         
     async def generate_from_selectors(self, test_case_id, test_case, selectors):
         """
         Generate Page Object Models directly from selectors.
@@ -409,3 +413,43 @@ Your output should include:
             import traceback
             traceback.print_exc()
             return False
+        
+    def validate_integration(self, test_case_id=None):
+        """
+        Validate the integration between generated Page Objects and Test Scripts.
+        
+        Args:
+            test_case_id (str, optional): The test case ID to include in the output filename
+            
+        Returns:
+            dict: Validation results
+        """
+        print(f"🔍 Validating integration for generated files...")
+        
+        # Run the integration validation
+        validation_result = run_integration_validation(
+            self.pages_dir,
+            self.tests_dir,
+            self.agents
+        )
+        
+        # If validation was successful, print a summary
+        if validation_result["status"] == "success":
+            print(f"✅ Integration validation complete")
+            print(f"📝 Full critique saved to: {validation_result['critique_file']}")
+            
+            # Print a brief summary of the critique
+            critique = validation_result["critique"]
+            print("\nSummary of key findings:")
+            
+            # Extract section headers for a brief summary
+            import re
+            sections = re.findall(r'## ([^\n]+)', critique)
+            for section in sections:
+                print(f"- {section}")
+                
+            print("\nReview the full critique file for details.")
+        else:
+            print(f"❌ Integration validation failed: {validation_result['message']}")
+        
+        return validation_result

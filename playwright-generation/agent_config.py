@@ -15,7 +15,8 @@ from agent_prompts import (
     POM_GENERATOR_PROMPT,
     POM_CRITIC_PROMPT,
     TEST_GENERATOR_PROMPT,
-    TEST_CRITIC_PROMPT
+    TEST_CRITIC_PROMPT,
+    INTEGRATION_CRITIC_PROMPT,
 )
 
 # Load environment variables
@@ -115,6 +116,12 @@ def create_agents():
         max_consecutive_auto_reply=0,
         code_execution_config={"use_docker": False}
     )
+
+    integration_critic = autogen.AssistantAgent(
+        name="Integration_Critic",
+        system_message=INTEGRATION_CRITIC_PROMPT,
+        llm_config=llm_config
+    )
     
     return {
         "user_proxy": user_proxy,
@@ -127,5 +134,6 @@ def create_agents():
         "pom_generator": pom_generator,
         "pom_critic": pom_critic,
         "test_generator": test_generator,
-        "test_critic": test_critic
+        "test_critic": test_critic,
+        "integration_critic": integration_critic
     }
