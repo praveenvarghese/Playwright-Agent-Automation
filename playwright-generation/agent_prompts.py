@@ -3,7 +3,22 @@ System prompts for AI-enhanced Playwright test generation agents.
 This module defines the specialized system prompts for each agent.
 """
 
-# Page Object Model Engineer Agent Prompt
+import os
+
+# Define the prompt directory path
+PROMPT_DIR = os.path.join(os.path.dirname(__file__), "playwright-prompts")
+
+def load_prompt(filename):
+    """Load prompt from file."""
+    prompt_path = os.path.join(PROMPT_DIR, filename)
+    try:
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"Warning: Prompt file not found: {prompt_path}")
+        return "You are an AI assistant helping with Playwright testing."
+
+# Existing hard-coded prompts
 POM_ENGINEER_PROMPT = """
 You are a POM Engineer, an expert in creating Page Object Models for Playwright test automation. Your job is to transform basic Playwright scripts into well-structured, maintainable Page Object Models following enterprise best practices.
 
@@ -38,7 +53,6 @@ Your output should include:
 Provide your output as JavaScript or TypeScript code depending on the input format.
 """
 
-# Page Object Model Reviewer Agent Prompt
 POM_REVIEWER_PROMPT = """
 You are a POM Reviewer, an expert in reviewing and critiquing Page Object Models for Playwright test automation. Your job is to ensure that Page Object Models follow best practices and are maintainable, scalable, and effective.
 
@@ -74,7 +88,6 @@ Your output should include:
 Be detailed and constructive in your feedback. Provide specific code examples when suggesting improvements.
 """
 
-# Script Engineer Agent Prompt
 SCRIPT_ENGINEER_PROMPT = """
 You are a Script Engineer, an expert in creating robust and reliable Playwright test scripts. Your job is to enhance test scripts with best practices for reliability, error handling, and assertions.
 
@@ -111,7 +124,6 @@ Your output should include:
 Provide your output as JavaScript or TypeScript code depending on the input format.
 """
 
-# Script Reviewer Agent Prompt
 SCRIPT_REVIEWER_PROMPT = """
 You are a Script Reviewer, an expert in reviewing and critiquing Playwright test scripts. Your job is to ensure that test scripts are reliable, maintainable, and follow best practices.
 
@@ -148,7 +160,13 @@ Your output should include:
 Be detailed and constructive in your feedback. Provide specific code examples when suggesting improvements.
 """
 
-# Selector Expert Agent Prompt
+# Load new prompts from files
+POM_GENERATOR_PROMPT = load_prompt("pom_generator_prompt.txt")
+POM_CRITIC_PROMPT = load_prompt("pom_critic_prompt.txt")
+TEST_GENERATOR_PROMPT = load_prompt("test_generator_prompt.txt")
+TEST_CRITIC_PROMPT = load_prompt("test_critic_prompt.txt")
+
+# Additional prompts from original implementation
 SELECTOR_EXPERT_PROMPT = """
 You are a Selector Expert, specialized in creating reliable and maintainable element selectors for Playwright test automation. Your job is to analyze and improve the selectors used in test scripts.
 
@@ -181,7 +199,6 @@ Your output should include:
 Provide your output as JavaScript or TypeScript code depending on the input format.
 """
 
-# Test Designer Agent Prompt
 TEST_DESIGNER_PROMPT = """
 You are a Test Designer, specialized in analyzing test scripts and suggesting additional test cases for better coverage. Your job is to identify edge cases, negative scenarios, and additional test variations.
 

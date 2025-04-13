@@ -280,31 +280,6 @@ Focus on addressing the key issues raised by the reviewer.
             "conversation": conversation
         }
     
-    def extract_page_objects_from_coordinator(self, chat_history):
-        """Extract page objects from coordinator's response."""
-        page_objects = []
-        
-        # Look through all messages
-        for message in chat_history:
-            if message["role"] == "assistant":
-                content = message["content"]
-                
-                # Look for sections with JavaScript code blocks that start with headers like "### 1. BasePage.js"
-                section_pattern = r'###\s+\d+\.\s+(\w+\.js).*?```javascript\s+(.*?)```'
-                sections = re.findall(section_pattern, content, re.DOTALL)
-                
-                for filename, code_block in sections:
-                    # Skip the test case file
-                    if "test" not in filename.lower():
-                        code_block = code_block.strip()
-                        print(f"Debug: Found page object for {filename} with length {len(code_block)}")
-                        page_objects.append(code_block)
-        
-        # Print debugging info
-        print(f"Debug: Found {len(page_objects)} potential page objects in the chat history")
-        
-        return page_objects
-    
     def _extract_test_script(self, chat_history):
         """Extract test script from chat history."""
         # Look through all messages
@@ -312,14 +287,14 @@ Focus on addressing the key issues raised by the reviewer.
             if message["role"] == "assistant":
                 content = message["content"]
                 
-                # Look for test script section
-                test_pattern = r'###\s+\d+\.\s+testCase\.js.*?```javascript\s+(.*?)```'
-                test_matches = re.findall(test_pattern, content, re.DOTALL)
+                # Try to extract code blocks
+                code_blocks = extract_code_blocks(content, "javascript")
                 
-                if test_matches and len(test_matches) > 0:
-                    test_script = test_matches[0].strip()
-                    print(f"Debug: Found test script with length {len(test_script)}")
-                    return test_script
+                # Find any block with test function
+                for block in code_blocks:
+                    if "test(" in block and "async" in block:
+                        print(f"Debug: Found test script with length {len(block)}")
+                        return block
         
         # If no specific test script found, print a debug message
         print("Debug: No test script found in the chat history")
@@ -343,94 +318,362 @@ Focus on addressing the key issues raised by the reviewer.
         
         print(f"✅ Saved page objects to {self.pages_dir}")
         print(f"✅ Saved test script to {test_file_path}")
+
+    def extract_page_objects_from_coordinator(self, chat_history):
+        """Extract page objects from coordinator's response."""
+        page_objects = []
+        
+        # Look through all messages
+        for message in chat_history:
+            if message["role"] == "assistant":
+                content = message["content"]
+                
+                # Try to extract code blocks
+                code_blocks = extract_code_blocks(content, "javascript")
+                
+                for block in code_blocks:
+                    # Check if it contains class definitions
+                    if "class " in block and ("module.exports = " in block):
+                        page_objects.append(block)
+        
+        # Print debugging info
+        print(f"Debug: Found {len(page_objects)} potential page objects in the chat history")
+        
+        return page_objects
     
     def generate_from_selectors(self, test_case_id, test_case, selectors):
-        """Generate Page Object Models directly from selectors."""
+        """
+        Generate Page Object Models directly from selectors.
+        
+        Args:
+            test_case_id (str): The test case ID
+            test_case (dict): The test case data
+            selectors (list): List of selector data
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        print(f"🚀 Generating Page Object Models for {test_case_id} from selectors")
+        
         try:
-            # Get coordinator agent
+            # First, analyze selectors to identify pages
+            pages = analyze_selectors(selectors)
+            
+            # Use AI to enhance the page objects and generate a test script
+            user_proxy = self.agents["user_proxy"]
             coordinator = self.agents["coordinator"]
             
-            # Prepare selectors data
+            # Prepare selectors data for agents
             selectors_json = json.dumps(selectors, indent=2)
             
-            # Create prompt
+            # Create prompt for the coordinator
             prompt = f"""
-    Generate a complete Page Object Model implementation for this test case and selectors.
+Please create a Page Object Model for Playwright based on these selectors and test case.
 
-    Test Case ID: {test_case_id}
-    Test Case Data: {json.dumps(test_case, indent=2)}
+Test Case ID: {test_case_id}
+Test Case Title: {test_case.get('title', '')}
+Test Steps: {test_case.get('steps', '')}
+Expected Results: {test_case.get('expectedResults', '')}
 
-    Selectors:
-    ```json
-    {selectors_json}
-    ```
+Selectors Data:
+```json
+{selectors_json}
+```
 
-    Format your response with:
-    ### 1. BasePage.js
-    ```javascript
-    // BasePage implementation
-    ```
+1. Create a BasePage class for common functionality
+2. Create Page Object classes based on logical pages identified in the selectors
+3. Create a test script that uses these Page Objects to implement the test case
+4. Make sure to follow enterprise best practices for Playwright testing
 
-    ### 2. PageObject1.js
-    ```javascript
-    // Page object implementation
-    ```
-
-    ### 3. testCase.js
-    ```javascript
-    // Test implementation
-    ```
-    """
+Your output should include:
+1. All Page Object class files (BasePage.js and any page-specific classes)
+2. A complete test script that uses these Page Object classes
+"""
             
-            # Get response
-            response = coordinator.generate_reply(
-                messages=[{"role": "user", "content": prompt}]
+            # Start the conversation with the coordinator
+            chat_result = user_proxy.initiate_chat(
+                coordinator,
+                message=prompt,
+                max_turns=6
             )
             
-            # Generate files
-            return self.generate_from_raw_response(test_case_id, response)
+            # Extract page objects using specialized method
+            page_objects = self.extract_page_objects_from_coordinator(chat_result.chat_history)
+            test_script = self._extract_test_script(chat_result.chat_history)
             
-        except Exception as e:
-            print(f"❌ Error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False 
-                  
-    def generate_from_raw_response(self, test_case_id, coordinator_response):
-        """Generate files directly from the coordinator's raw response without any manipulation."""
-        try:
-            # Create output directories
-            os.makedirs(self.pages_dir, exist_ok=True)
-            os.makedirs(self.tests_dir, exist_ok=True)
+            # Print debug info
+            print(f"Found {len(page_objects)} page objects and test script: {'Yes' if test_script else 'No'}")
             
-            # Extract all JavaScript code blocks with their preceding headers
-            sections = re.findall(r'###\s+\d+\.\s+(\w+\.js).*?```javascript\s+(.*?)```', 
-                            coordinator_response, re.DOTALL)
-            
-            if not sections:
-                print("No file sections found in the response")
+            # Save the results
+            if page_objects and test_script:
+                self._save_results(test_case_id, page_objects, test_script)
+                return True
+            else:
+                print(f"❌ Failed to extract page objects or test script from response")
+                # Save the chat history for debugging
+                debug_file = f"debug_{test_case_id}_chat.txt"
+                with open(debug_file, "w", encoding="utf-8") as f:
+                    for msg in chat_result.chat_history:
+                        f.write(f"{msg['role']} ({msg.get('name', 'Unknown')}):\n{msg['content']}\n\n{'='*80}\n\n")
+                print(f"📝 Saved chat history to {debug_file} for debugging")
                 return False
-            
-            # Save each file with its appropriate name
-            test_file_saved = False
-            for filename, content in sections:
-                content = content.strip()
                 
-                if "test" in filename.lower():
-                    # Save as test spec
-                    file_path = os.path.join(self.tests_dir, f"{test_case_id}.spec.js")
-                    test_file_saved = True
-                else:
-                    # Save as page object
-                    file_path = os.path.join(self.pages_dir, filename)
-                
-                save_file(file_path, content)
-                print(f"✅ Generated {filename}")
-            
-            return True
-            
         except Exception as e:
-            print(f"❌ Error: {str(e)}")
+            print(f"❌ Error generating from selectors: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
+    
+    async def generate_with_specialized_agents(self, test_case_id, test_case, selectors):
+        """
+        Generate Page Object Models and test script using specialized agents.
+        
+        Args:
+            test_case_id (str): The test case ID
+            test_case (dict): The test case data
+            selectors (list): List of selector data
+                
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        print(f"🚀 Generating with specialized agents for {test_case_id}")
+        
+        try:
+            # Get specialized agents
+            user_proxy = self.agents["user_proxy"]
+            pom_generator = self.agents["pom_generator"]
+            pom_critic = self.agents["pom_critic"]
+            test_generator = self.agents["test_generator"]
+            test_critic = self.agents["test_critic"]
+            
+            # Prepare selectors data for the prompt
+            selectors_json = json.dumps(selectors, indent=2)
+            
+            # Step 1: Generate Page Objects
+            pom_prompt = f"""
+            Generate Page Object Models for Playwright based on the provided selectors. 
+            
+            Test Case ID: {test_case_id}
+            Test Case Title: {test_case.get('title', '')}
+            
+            Selectors Data:
+            ```json
+            {selectors_json}
+            ```
+            
+            Instructions:
+            1. Analyze the selectors to identify logical pages
+            2. Create a BasePage.js file with common functionality
+            3. Create specific page objects for each logical page
+            4. Follow Page Object Model best practices
+            5. Format your response with clear file headers and JavaScript code blocks
+            
+            Format each file as:
+            ### 1. FileName.js
+            ```javascript
+            // Implementation
+            ```
+            """
+            
+            print("🔍 Step 1: Generating Page Object Models")
+            pom_chat = await user_proxy.initiate_chat(
+                pom_generator,
+                message=pom_prompt,
+                max_turns=2
+            )
+            
+            pom_response = pom_chat.chat_history[-1]["content"]
+            
+            # Step 2: Critique Page Objects
+            critique_prompt = f"""
+            Review these Page Object Models and suggest improvements:
+            
+            {pom_response}
+            
+            Focus on:
+            1. Structure and organization
+            2. Selector strategies
+            3. Method design and naming
+            4. Error handling
+            5. Documentation
+            
+            Provide specific code examples for your suggestions.
+            """
+            
+            print("🔍 Step 2: Critiquing Page Object Models")
+            critique_chat = await user_proxy.initiate_chat(
+                pom_critic,
+                message=critique_prompt,
+                max_turns=2
+            )
+            
+            critique_response = critique_chat.chat_history[-1]["content"]
+            
+            # Step 3: Improve Page Objects based on critique
+            improvement_prompt = f"""
+            Improve these Page Object Models based on the critique:
+            
+            Original Page Objects:
+            {pom_response}
+            
+            Critique:
+            {critique_response}
+            
+            Provide the complete improved implementation following the same format:
+            ### 1. FileName.js
+            ```javascript
+            // Implementation
+            ```
+            """
+            
+            print("🔍 Step 3: Improving Page Object Models")
+            improved_pom_chat = await user_proxy.initiate_chat(
+                pom_generator,
+                message=improvement_prompt,
+                max_turns=2
+            )
+            
+            improved_pom = improved_pom_chat.chat_history[-1]["content"]
+            
+            # Extract page objects from the improved response
+            page_objects = self.extract_page_objects_from_specialized_response(improved_pom)
+            
+            # Step 4: Generate Test Script
+            test_prompt = f"""
+            Create a Playwright test script using the Page Object Models:
+            
+            {improved_pom}
+            
+            Test Case ID: {test_case_id}
+            Test Case Title: {test_case.get('title', '')}
+            Test Steps: {test_case.get('steps', '')}
+            Expected Results: {test_case.get('expectedResults', '')}
+            
+            Create a complete test script that:
+            1. Imports the Page Object Models correctly (using '../pages/ClassName')
+            2. Initializes page objects
+            3. Performs the test steps
+            4. Includes proper assertions
+            5. Follows best practices for Playwright testing
+            
+            Format your response as:
+            ### N. testCase.js
+            ```javascript
+            // Implementation
+            ```
+            """
+            
+            print("🔍 Step 4: Generating Test Script")
+            test_chat = await user_proxy.initiate_chat(
+                test_generator,
+                message=test_prompt,
+                max_turns=2
+            )
+            
+            test_script = test_chat.chat_history[-1]["content"]
+            
+            # Step 5: Critique Test Script
+            test_critique_prompt = f"""
+            Review this test script and suggest improvements:
+            
+            {test_script}
+            
+            Focus on:
+            1. Reliability and robustness
+            2. Wait strategies
+            3. Assertion quality
+            4. Error handling
+            5. Test structure
+            
+            Provide specific code examples for your suggestions.
+            """
+            
+            print("🔍 Step 5: Critiquing Test Script")
+            test_critique_chat = await user_proxy.initiate_chat(
+                test_critic,
+                message=test_critique_prompt,
+                max_turns=2
+            )
+            
+            test_critique = test_critique_chat.chat_history[-1]["content"]
+            
+            # Step 6: Improve Test Script based on critique
+            test_improvement_prompt = f"""
+            Improve this test script based on the critique:
+            
+            Original Test Script:
+            {test_script}
+            
+            Critique:
+            {test_critique}
+            
+            Provide the complete improved implementation as:
+            ### N. testCase.js
+            ```javascript
+            // Implementation
+            ```
+            """
+            
+            print("🔍 Step 6: Improving Test Script")
+            final_test_chat = await user_proxy.initiate_chat(
+                test_generator,
+                message=test_improvement_prompt,
+                max_turns=2
+            )
+            
+            final_test_script = final_test_chat.chat_history[-1]["content"]
+            
+            # Extract test script from the final response
+            test_file = self.extract_test_script_from_specialized_response(final_test_script)
+            
+            # Save the results
+            self._save_results(test_case_id, page_objects, test_file)
+            
+            print(f"✅ Successfully generated test for {test_case_id} using specialized agents")
+            return True
+                
+        except Exception as e:
+            print(f"❌ Error in specialized generation: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def extract_page_objects_from_specialized_response(self, response):
+        """Extract page objects from structured response."""
+        page_objects = []
+        
+        # Find sections with file headers and code blocks
+        import re
+        matches = re.findall(r'###\s+\d+\.\s+(\w+\.js).*?```javascript\s+(.*?)```', response, re.DOTALL)
+        
+        for filename, code_block in matches:
+            if "test" not in filename.lower():  # Skip test scripts
+                page_objects.append(code_block.strip())
+                print(f"Debug: Extracted {filename}")
+        
+        print(f"Debug: Found {len(page_objects)} potential page objects in the response")
+        
+        return page_objects
+
+    def extract_test_script_from_specialized_response(self, response):
+        """Extract test script from structured response."""
+        import re
+        
+        # Look for test script with header
+        matches = re.findall(r'###\s+\w+\.\s+testCase\.js.*?```javascript\s+(.*?)```', response, re.DOTALL)
+        
+        if matches and len(matches) > 0:
+            test_script = matches[0].strip()
+            print(f"Debug: Found test script with length {len(test_script)}")
+            return test_script
+        
+        # Alternative pattern - look for any script with test function
+        test_blocks = re.findall(r'```javascript\s+(.*?test\(.*?}\);.*?)```', response, re.DOTALL)
+        
+        if test_blocks and len(test_blocks) > 0:
+            test_script = test_blocks[0].strip()
+            print(f"Debug: Found test script with alternative pattern, length {len(test_script)}")
+            return test_script
+        
+        print("Debug: No test script found in the response")
+        return None

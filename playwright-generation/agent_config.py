@@ -10,7 +10,12 @@ from agent_prompts import (
     POM_ENGINEER_PROMPT,
     POM_REVIEWER_PROMPT,
     SCRIPT_ENGINEER_PROMPT,
-    SCRIPT_REVIEWER_PROMPT
+    SCRIPT_REVIEWER_PROMPT,
+    # Add new prompt constants
+    POM_GENERATOR_PROMPT,
+    POM_CRITIC_PROMPT,
+    TEST_GENERATOR_PROMPT,
+    TEST_CRITIC_PROMPT
 )
 
 # Load environment variables
@@ -77,6 +82,31 @@ def create_agents():
         llm_config=llm_config
     )
     
+    # NEW: Specialized Agents for enhanced workflow
+    pom_generator = autogen.AssistantAgent(
+        name="POM_Generator",
+        system_message=POM_GENERATOR_PROMPT,
+        llm_config=llm_config
+    )
+    
+    pom_critic = autogen.AssistantAgent(
+        name="POM_Critic",
+        system_message=POM_CRITIC_PROMPT,
+        llm_config=llm_config
+    )
+    
+    test_generator = autogen.AssistantAgent(
+        name="Test_Generator",
+        system_message=TEST_GENERATOR_PROMPT,
+        llm_config=llm_config
+    )
+    
+    test_critic = autogen.AssistantAgent(
+        name="Test_Critic",
+        system_message=TEST_CRITIC_PROMPT,
+        llm_config=llm_config
+    )
+    
     # Create a UserProxyAgent just for initiating the conversations
     # This one has code execution disabled to prevent Docker issues
     user_proxy = autogen.UserProxyAgent(
@@ -92,5 +122,10 @@ def create_agents():
         "pom_engineer": pom_engineer,
         "pom_reviewer": pom_reviewer,
         "script_engineer": script_engineer,
-        "script_reviewer": script_reviewer
+        "script_reviewer": script_reviewer,
+        # Add new specialized agents
+        "pom_generator": pom_generator,
+        "pom_critic": pom_critic,
+        "test_generator": test_generator,
+        "test_critic": test_critic
     }

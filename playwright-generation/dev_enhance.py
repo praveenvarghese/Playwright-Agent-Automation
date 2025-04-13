@@ -3,7 +3,7 @@ import os
 import sys
 import json
 import asyncio
-from agent_orchestrator import PlaywrightAgentOrchestrator
+from orchestrator.agent_orchestrator import PlaywrightAgentOrchestrator
 
 async def enhance_from_existing_selectors(test_case_id, selectors_file=None):
     """
@@ -41,8 +41,9 @@ async def enhance_from_existing_selectors(test_case_id, selectors_file=None):
         # Initialize orchestrator
         orchestrator = PlaywrightAgentOrchestrator(output_dir="playwright_tests")
         
-        # Generate Page Object Models directly from selectors using the simplified approach
-        success = orchestrator.generate_from_selectors(test_case_id, test_case, selectors)
+        # Generate Page Object Models from selectors
+        # The generate_from_selectors method automatically uses specialized agents if available
+        success = await orchestrator.generate_from_selectors(test_case_id, test_case, selectors)
         
         return success
         
