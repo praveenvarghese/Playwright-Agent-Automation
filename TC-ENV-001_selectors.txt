@@ -1,0 +1,33 @@
+# CSS selectors detected by browser_use
+
+Action: input
+Element: input
+Text: ⌨️  input admin into index 4
+Selector: html > body > div:nth-of-type(2) > div:nth-of-type(2) > article > main > section > form > fieldset > div:nth-of-type(2) > div > input.input-field__input[id="username"][type="text"][autocomplete="username"][name="username"]
+
+Action: input
+Element: input
+Text: ⌨️  input admin into index 6
+Selector: html > body > div:nth-of-type(2) > div:nth-of-type(2) > article > main > section > form > fieldset > div:nth-of-type(3) > div > input.input-field__input[id="password"][type="password"][autocomplete="current-password"][name="password"]
+
+Action: click
+Element: button
+Text: 🖱️  clicked button with index 7: login
+Selector: html > body > div:nth-of-type(2) > div:nth-of-type(2) > article > main > section > form > button.button.button--primary.button--login[type="submit"]
+
+Action: click
+Element: button
+Text: 🖱️  clicked button with index 9: add
+create environment
+Selector: html > body > div:nth-of-type(2) > div:nth-of-type(2) > main > div > section > section > button.button.button--table-row.button--environment-list-add[type="button"]
+
+Action: input
+Element: input
+Text: ⌨️  input new native environment into index 2
+Selector: html > body > div:nth-of-type(3) > dialog > section > div > section > form > fieldset > div > div > input.input-field__input[id="envName"][type="text"][autocomplete="off"][name="name"]
+
+Action: click
+Element: button
+Text: 🖱️  clicked button with index 8: save
+Selector: html > body > div:nth-of-type(3) > dialog > section > nav > button:nth-of-type(2).button.button--primary.button--dialog-save[type="submit"]
+

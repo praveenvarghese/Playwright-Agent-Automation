@@ -51,7 +51,7 @@ def enhance_playwright_script(test_case_id, original_script_path, selectors_file
         traceback.print_exc()
         return False
 
-def generate_and_enhance(test_case_id):
+async def generate_and_enhance(test_case_id):
     """
     Generate a basic Playwright script and then enhance it.
     This function integrates with the existing integrated_test_generator.
@@ -63,23 +63,14 @@ def generate_and_enhance(test_case_id):
         bool: True if successful, False otherwise
     """
     try:
-        # Import the integrated test generator dynamically
-        # This assumes it's in the parent directory
-        import sys
-        import os
-        
-        # Add parent directory to path
-        parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        sys.path.append(parent_dir)
-        
-        # Import the integrated_test_generator module
+        # Import the integrated test generator
         from integrated_test_generator import generate_integrated_test
-        import asyncio
         
         # Run the integrated test generator to create basic script
         print(f"🚀 Generating basic Playwright script for {test_case_id}")
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(generate_integrated_test(test_case_id))
+        
+        # Since we're already in an async context, we can just await the function
+        await generate_integrated_test(test_case_id)
         
         # Check if files were generated
         original_script_path = f"{test_case_id}.spec.js"
@@ -104,4 +95,4 @@ def generate_and_enhance(test_case_id):
         print(f"❌ Error in generate_and_enhance: {str(e)}")
         import traceback
         traceback.print_exc()
-        return False
+        return False   

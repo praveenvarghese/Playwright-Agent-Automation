@@ -1,0 +1,38 @@
+[
+  {
+    "action": "input",
+    "tag": "input",
+    "text": "\u2328\ufe0f  input admin into index 4",
+    "selector": "html > body > div:nth-of-type(2) > div:nth-of-type(2) > article > main > section > form > fieldset > div:nth-of-type(2) > div > input.input-field__input[id=\"username\"][type=\"text\"][autocomplete=\"username\"][name=\"username\"]"
+  },
+  {
+    "action": "input",
+    "tag": "input",
+    "text": "\u2328\ufe0f  input admin into index 6",
+    "selector": "html > body > div:nth-of-type(2) > div:nth-of-type(2) > article > main > section > form > fieldset > div:nth-of-type(3) > div > input.input-field__input[id=\"password\"][type=\"password\"][autocomplete=\"current-password\"][name=\"password\"]"
+  },
+  {
+    "action": "click",
+    "tag": "button",
+    "text": "\ud83d\uddb1\ufe0f  clicked button with index 7: login",
+    "selector": "html > body > div:nth-of-type(2) > div:nth-of-type(2) > article > main > section > form > button.button.button--primary.button--login[type=\"submit\"]"
+  },
+  {
+    "action": "click",
+    "tag": "button",
+    "text": "\ud83d\uddb1\ufe0f  clicked button with index 9: add\ncreate environment",
+    "selector": "html > body > div:nth-of-type(2) > div:nth-of-type(2) > main > div > section > section > button.button.button--table-row.button--environment-list-add[type=\"button\"]"
+  },
+  {
+    "action": "input",
+    "tag": "input",
+    "text": "\u2328\ufe0f  input new native environment into index 2",
+    "selector": "html > body > div:nth-of-type(3) > dialog > section > div > section > form > fieldset > div > div > input.input-field__input[id=\"envName\"][type=\"text\"][autocomplete=\"off\"][name=\"name\"]"
+  },
+  {
+    "action": "click",
+    "tag": "button",
+    "text": "\ud83d\uddb1\ufe0f  clicked button with index 8: save",
+    "selector": "html > body > div:nth-of-type(3) > dialog > section > nav > button:nth-of-type(2).button.button--primary.button--dialog-save[type=\"submit\"]"
+  }
+]

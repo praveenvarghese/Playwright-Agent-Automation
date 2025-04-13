@@ -92,9 +92,9 @@ async def main():
             output_dir=args.output_dir
         )
     else:
-        # Generate and enhance
+        # Generate and enhance - Need to await this since it's async
         print(f"🚀 Generating and enhancing Playwright script for {args.test_case_id}")
-        success = generate_and_enhance(
+        success = await generate_and_enhance(
             test_case_id=args.test_case_id
         )
     
@@ -105,6 +105,6 @@ async def main():
     else:
         print(f"❌ Failed to enhance Playwright test for {args.test_case_id}")
         sys.exit(1)
-
+        
 if __name__ == "__main__":
     asyncio.run(main())

@@ -19,7 +19,7 @@ load_dotenv()
 # Configure OpenAI API
 config_list = [
     {
-        "model": os.getenv("OPENAI_MODEL", "gpt-4"),
+        "model": os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),  # Use the deployment name
         "api_key": os.getenv("AZURE_OPENAI_API_KEY"),
         "api_type": "azure",
         "base_url": os.getenv("AZURE_OPENAI_ENDPOINT"),
@@ -42,12 +42,11 @@ def create_agents():
     # Define agent configurations with Azure OpenAI settings
     llm_config = get_llm_config()
     
-    # User Proxy Agent (represents the system input)
-    user_proxy = autogen.UserProxyAgent(
-        name="User",
-        human_input_mode="NEVER",
-        max_consecutive_auto_reply=0,
-        system_message="You are a proxy for the user input and final output. You coordinate between the engineering and review agents."
+    # Coordinator Agent (instead of UserProxyAgent)
+    coordinator = autogen.AssistantAgent(
+        name="Coordinator",
+        system_message="You are a coordinator for the test generation process. You coordinate between the engineering and review agents.",
+        llm_config=llm_config
     )
     
     # POM Engineer Agent
@@ -78,8 +77,18 @@ def create_agents():
         llm_config=llm_config
     )
     
+    # Create a UserProxyAgent just for initiating the conversations
+    # This one has code execution disabled to prevent Docker issues
+    user_proxy = autogen.UserProxyAgent(
+        name="User",
+        human_input_mode="NEVER",
+        max_consecutive_auto_reply=0,
+        code_execution_config={"use_docker": False}
+    )
+    
     return {
         "user_proxy": user_proxy,
+        "coordinator": coordinator,
         "pom_engineer": pom_engineer,
         "pom_reviewer": pom_reviewer,
         "script_engineer": script_engineer,
