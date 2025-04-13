@@ -5,13 +5,14 @@ import json
 import asyncio
 from orchestrator.agent_orchestrator import PlaywrightAgentOrchestrator
 
-async def enhance_from_existing_selectors(test_case_id, selectors_file=None):
+async def enhance_from_existing_selectors(test_case_id, selectors_file=None, use_design_first=True):
     """
     Enhance Playwright test directly from existing selectors file.
     
     Args:
         test_case_id (str): Test case ID
         selectors_file (str): Path to selectors JSON file (optional)
+        use_design_first (bool): Whether to use the design-first approach
         
     Returns:
         bool: True if successful, False otherwise
@@ -41,9 +42,11 @@ async def enhance_from_existing_selectors(test_case_id, selectors_file=None):
         # Initialize orchestrator
         orchestrator = PlaywrightAgentOrchestrator(output_dir="playwright_tests")
         
-        # Generate Page Object Models from selectors
-        # The generate_from_selectors method automatically uses specialized agents if available
-        success = await orchestrator.generate_from_selectors(test_case_id, test_case, selectors)
+        # Use design-first or original approach
+        if use_design_first:
+            success = orchestrator.generate_with_design_first(test_case_id, test_case, selectors)
+        else:
+            success = await orchestrator.generate_from_selectors(test_case_id, test_case, selectors)
         
         return success
         
@@ -52,7 +55,7 @@ async def enhance_from_existing_selectors(test_case_id, selectors_file=None):
         import traceback
         traceback.print_exc()
         return False
-
+    
 async def main():
     """Main entry point."""
     if len(sys.argv) < 2:

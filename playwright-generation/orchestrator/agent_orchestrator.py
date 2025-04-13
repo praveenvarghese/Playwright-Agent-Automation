@@ -5,6 +5,7 @@ This module orchestrates the conversation flow between Autogen agents.
 
 import os
 import json
+import re
 import asyncio
 from agent_config import create_agents
 from pom_generation import save_page_objects, analyze_selectors
@@ -12,6 +13,7 @@ from utils import save_file
 from orchestrator.extraction_utils import extract_page_objects_from_coordinator, extract_test_script_from_chat
 from orchestrator.agent_specialized import generate_with_specialized_agents
 from validation import run_integration_validation
+from critique_feedback import apply_critique_improvements
 
 class PlaywrightAgentOrchestrator:
     """Orchestrates the agent-based generation of enhanced Playwright tests."""
@@ -29,7 +31,7 @@ class PlaywrightAgentOrchestrator:
     
     def _save_results(self, test_case_id, page_objects, test_script):
         """
-        Save the generated page objects and test script.
+        Save the generated page objects and test script and run the feedback loop.
         
         Args:
             test_case_id (str): The test case ID
@@ -47,8 +49,20 @@ class PlaywrightAgentOrchestrator:
         print(f"✅ Saved test script to {test_file_path}")
         
         # Run integration validation
-        self.validate_integration(test_case_id)
-         
+        validation_result = self.validate_integration(test_case_id)
+        
+        # If validation was successful, run the feedback loop
+        if validation_result["status"] == "success":
+            print("\n🔄 Starting feedback loop to improve code based on critique...")
+            improvement_result = self.improve_from_critique(validation_result["critique_file"])
+            
+            if improvement_result["status"] == "success":
+                print("🎉 Feedback loop complete - code has been improved based on critique")
+            else:
+                print("⚠️ Feedback loop encountered issues - some improvements may not have been applied")
+        else:
+            print("⚠️ Integration validation failed - skipping feedback loop")
+
     async def generate_from_selectors(self, test_case_id, test_case, selectors):
         """
         Generate Page Object Models directly from selectors.
@@ -453,3 +467,270 @@ Your output should include:
             print(f"❌ Integration validation failed: {validation_result['message']}")
         
         return validation_result
+    
+    def improve_from_critique(self, critique_file=None):
+        """
+        Improve generated files based on the integration critique.
+        
+        Args:
+            critique_file (str, optional): Path to critique file - will use the default if not specified
+            
+        Returns:
+            dict: Results of the improvement process
+        """
+        # If no critique file specified, use default
+        if not critique_file:
+            critique_file = os.path.join(os.path.dirname(self.pages_dir), "integration_critique.md")
+        
+        if not os.path.exists(critique_file):
+            print(f"❌ Critique file not found: {critique_file}")
+            return {"status": "error", "message": "Critique file not found"}
+        
+        print(f"🔍 Analyzing critique and generating improvements: {critique_file}")
+        
+        # Apply improvements based on the critique
+        result = apply_critique_improvements(
+            critique_file,
+            self.pages_dir,
+            self.tests_dir,
+            self.agents
+        )
+        
+        if result["status"] == "success":
+            print("✅ Successfully improved files based on critique")
+            print(f"📝 Addressed {len(result['key_issues'])} key issues:")
+            
+            for i, issue in enumerate(result['key_issues'], 1):
+                print(f"  {i}. {issue['type']}")
+            
+            print(f"💾 Updated {len(result['improved_files'])} files")
+        else:
+            print(f"❌ Failed to improve files: {result['message']}")
+        
+        return result
+    
+    def generate_with_design_first(self, test_case_id, test_case, selectors):
+        """
+        Generate Page Object Models using a design-first approach with critique.
+        
+        Args:
+            test_case_id (str): The test case ID
+            test_case (dict): The test case data
+            selectors (list): List of selector data
+                
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        print(f"🚀 Generating with design-first approach for {test_case_id}")
+        
+        try:
+            # Phase 1: Generate and critique design
+            print("🔍 Phase 1: Generating and reviewing design")
+            design = self._generate_design(test_case_id, test_case, selectors)
+            critique = self._critique_design(design)
+            
+            # Phase 2: Generate implementation based on design and critique
+            print("🔍 Phase 2: Generating implementation with design guidance")
+            implementation = self._generate_implementation(design, critique, test_case_id, selectors)
+            
+            # Save the implementation
+            page_objects = implementation.get("page_objects", [])
+            test_script = implementation.get("test_script", "")
+            
+            if page_objects and test_script:
+                self._save_results(test_case_id, page_objects, test_script)
+                return True
+            else:
+                print("❌ Failed to generate complete implementation")
+                return False
+            
+        except Exception as e:
+            print(f"❌ Error in design-first generation: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+            
+    def _generate_design(self, test_case_id, test_case, selectors):
+        """Generate a high-level design for the Page Objects and test script."""
+        user_proxy = self.agents["user_proxy"]
+        generator = self.agents.get("pom_generator", self.agents["coordinator"])
+        
+        # Prepare selectors data for the prompt
+        selectors_json = json.dumps(selectors, indent=2)
+        
+        # Create design prompt
+        design_prompt = f"""
+        Create a high-level design for Playwright Page Objects and test script based on these selectors and test case.
+        
+        Test Case ID: {test_case_id}
+        Test Case Title: {test_case.get('title', '')}
+        Test Steps: {test_case.get('steps', '')}
+        Expected Results: {test_case.get('expectedResults', '')}
+        
+        Selectors:
+        ```json
+        {selectors_json}
+        ```
+        
+        Your design should include:
+        1. File structure (what page objects will be created)
+        2. Dependencies between files (how they will reference each other)
+        3. Selector strategy (how selectors will be organized and referenced)
+        4. Error handling approach (where and how errors will be handled)
+        5. Return patterns (how methods will return values or page objects)
+        
+        Do NOT include actual implementation code, just the high-level architecture and decisions.
+        """
+        
+        # Generate the design
+        design_result = user_proxy.initiate_chat(
+            generator,
+            message=design_prompt,
+            max_turns=1
+        )
+        
+        # Extract the design from the response
+        design = design_result.chat_history[-1]["content"]
+        return design
+
+    def _critique_design(self, design):
+        """Have the critique agent review the design for potential issues."""
+        user_proxy = self.agents["user_proxy"]
+        critic = self.agents.get("integration_critic", self.agents["coordinator"])
+        
+        # Create critique prompt
+        critique_prompt = f"""
+        Review this high-level design for Playwright Page Objects and identify potential integration issues.
+        
+        Design:
+        {design}
+        
+        Focus on these specific areas:
+        1. Circular dependencies between files
+        2. Inconsistent selector strategies
+        3. Redundant error handling
+        4. Inconsistent return patterns
+        5. Poor separation of concerns
+        6. Module system - ensure proper ES6 module usage without default exports
+        
+        Provide specific recommendations for improving each identified issue.
+        """
+        
+        # Generate the critique
+        critique_result = user_proxy.initiate_chat(
+            critic,
+            message=critique_prompt,
+            max_turns=1
+        )
+        
+        # Extract the critique from the response
+        critique = critique_result.chat_history[-1]["content"]
+        return critique
+    
+    def _generate_implementation(self, design, critique, test_case_id, selectors):
+        """Generate the actual implementation based on the design and critique."""
+        user_proxy = self.agents["user_proxy"]
+        generator = self.agents.get("pom_generator", self.agents["coordinator"])
+        
+        # Prepare selectors data for the prompt
+        selectors_json = json.dumps(selectors, indent=2)
+        
+        # Create implementation prompt
+        implementation_prompt = f"""
+        Generate a complete implementation of Playwright Page Objects and test script based on this design and critique feedback.
+        
+        Design:
+        {design}
+        
+        Critique and Recommendations:
+        {critique}
+        
+        Test Case ID: {test_case_id}
+        
+        Selectors:
+        ```json
+        {selectors_json}
+        ```
+        
+        Implement:
+        1. A BasePage.js file with common functionality
+        2. All necessary Page Object files following the design
+        3. A test script that uses these Page Objects
+        
+        IMPORTANT REQUIREMENTS:
+
+        1. SELECTOR USAGE:
+        - Use the original selectors from the JSON but simplify them where possible
+        - For username input, prefer: 'input#username' or similar simple selector
+        - For password input, prefer: 'input#password' or similar simple selector
+        - For login button, use the class from original but simplify
+        - For other buttons and inputs, extract distinctive IDs or classes from the originals
+        
+       2. USE ES6 MODULE FORMAT CORRECTLY:
+        - Dont Generate Default exports
+        - Use exports for page classes:
+            export class BasePage {{ 
+            // methods
+            }}
+        
+        Format your response with clearly separated code blocks for each file using this exact format:
+        
+        ### BasePage.js
+        ```javascript
+        // Complete BasePage implementation using ES6 modules
+        ```
+        
+        ### LoginPage.js
+        ```javascript
+        // Complete LoginPage implementation using ES6 modules
+        ```
+        
+        ### testCase.spec.js
+        ```javascript
+        // Complete test script implementation using ES6 modules
+        ```
+        
+        Each file should be complete and ready to use without modification.
+        """
+        
+        # Generate the implementation
+        implementation_result = user_proxy.initiate_chat(
+            generator,
+            message=implementation_prompt,
+            max_turns=1
+        )
+        
+        # Extract page objects and test script from the response
+        response = implementation_result.chat_history[-1]["content"]
+
+        with open(f"debug_{test_case_id}_implementation.txt", "w", encoding="utf-8") as f:
+            f.write(response)
+        print(f"Debug: Saved response to debug_{test_case_id}_implementation.txt")
+        
+        # Better extraction for files
+        page_objects = []
+        test_script = ""
+        
+        # Use regular expressions to find files and their content
+        file_pattern = r'###\s+([\w\.]+\.js)\s*```javascript\s*(.*?)\s*```'
+        file_matches = re.findall(file_pattern, response, re.DOTALL)
+
+        for filename, content in file_matches:
+            content = content.strip()
+            print(f"Found file: {filename}")
+            
+            # Determine if this is a page object or test script
+            if 'test' in filename.lower() or 'spec' in filename.lower():
+                test_script = content
+                print(f"Extracted test script: {filename}")
+            else:
+                page_objects.append(content)
+                print(f"Extracted page object: {filename}")
+
+        print(f"Extracted {len(page_objects)} page objects and {'a' if test_script else 'no'} test script")
+        
+        return {
+            "page_objects": page_objects,
+            "test_script": test_script,
+            "response": response
+        }
