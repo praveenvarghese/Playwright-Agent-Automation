@@ -274,6 +274,14 @@ async def main():
             feature_id = sys.argv[2]
             feature_deleter.search_feature(feature_id)
         
+        # Combined operations
+        elif sys.argv[1] == "delete-all":
+            # Delete all test cases and features
+            print("Deleting all test cases and features...")
+            test_cases_deleted = test_case_deleter.delete_all_test_cases()
+            features_deleted = feature_deleter.delete_all_features()
+            print(f"Successfully deleted {test_cases_deleted} test cases and {features_deleted} features.")
+        
         # Interactive mode
         elif sys.argv[1] == "interactive":
             while True:
@@ -322,6 +330,7 @@ def print_usage():
     print("  python delete_feature_case.py search-testcase <test_case_id>")
     print("  python delete_feature_case.py delete-feature <feature_id>")
     print("  python delete_feature_case.py delete-all-features")
+    print("  python delete_feature_case.py delete-all")
     print("  python delete_feature_case.py list-features")
     print("  python delete_feature_case.py search-feature <feature_id>")
 
