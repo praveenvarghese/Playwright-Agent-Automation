@@ -7,6 +7,7 @@ from src.test_cases.generator import generate_test_cases
 from src.vector_search.retrieval import VectorRetrievalSystem
 from src.vector_search.embeddings import EmbeddingsGenerator
 from src.vector_search.feature_processor import FeatureProcessor
+from src.utils.test_case_analyzer import analyze_test_cases_with_embeddings
 
 # Helper functions for message formatting (reusing from test_case_workflow.py)
 def print_progress(message): print(f"🔹 {message}")
@@ -187,7 +188,7 @@ async def update_feature_workflow(feature_data):
         await fix_null_status_in_test_cases(feature_data['id'])
         
         # Step 4: Analyze test cases in relation to criteria changes
-        test_case_decision = analyze_test_cases(existing_test_cases, criteria_changes)
+        test_case_decision = await analyze_test_cases_with_embeddings(existing_test_cases, criteria_changes)
         
         # Log test case decision
         print(f"🔹 Test case analysis complete:")

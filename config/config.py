@@ -30,7 +30,7 @@ context_config = BrowserContextConfig(
 # Initialize browser and context
 browser = Browser(config=browser_config)
 context = BrowserContext(browser=browser, config=context_config)
-
+TEST_CASE_ITERATIONS = 2
 #LLM Configuration for AutoGen with Azure OpenAI
 config_list = [
     {

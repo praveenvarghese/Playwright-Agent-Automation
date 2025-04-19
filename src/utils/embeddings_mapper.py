@@ -66,7 +66,7 @@ async def map_test_cases_to_criteria_with_embeddings(parsed_test_cases, acceptan
             
             # Use a threshold to determine matches
             # This threshold can be adjusted based on testing
-            if similarity > 0.65:  # Slightly lower threshold to ensure matches
+            if similarity > 0.80:  # Slightly lower threshold to ensure matches
                 matched_criteria.append({
                     "criteriaId": criteria["id"],
                     "description": criteria["description"],

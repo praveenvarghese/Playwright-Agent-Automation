@@ -1,12 +1,22 @@
-For each identified requirement, generate 2 simple test cases that include only:
+For each identified requirement, generate test cases in JSON format. Each test case should include these exact fields:
 
-1. Test Case ID: TC-ENV-[Number] (Use only letters, numbers, underscore, dash, or equal sign)
-2. Test Case Title: Clear, action-oriented title
-3. Test Steps: Numbered, specific user actions (no more than 5 steps per test case)
-4. Expected Results: Observable outcomes
+{
+  "id": "TC-ENV-[Number]",  
+  "title": "Clear, action-oriented title",
+  "steps": [
+    "1. First step",
+    "2. Second step",
+    "3. Third step",
+    "4. Fourth step",
+    "5. Fifth step"
+  ],
+  "expectedResults": "Observable outcomes"
+}
 
-Focus on the most basic, core functionality test cases. Do not include preconditions, test data, assertion points, or test categories. Keep the test cases simple and straightforward.
+Ensure you:
+- Use only letters, numbers, underscore, dash in the ID
+- Include no more than 5 steps per test case
+- Provide clear, verifiable expected results
+- Format the output as a JSON array containing all test cases
 
-Please provide your response in JSON format for easier processing.
-Each test case should be a JSON object with at least id, title, steps, and expectedResults fields.
-Include all test cases in a JSON array.
+Focus on core functionality and keep test cases simple and straightforward.

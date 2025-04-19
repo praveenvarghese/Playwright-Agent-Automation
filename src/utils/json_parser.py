@@ -60,62 +60,61 @@ def parse_test_cases_from_llm_output(llm_output):
     Returns:
         list: List of parsed test case dictionaries
     """
-    # First try to extract JSON from the text
-    json_text = extract_json_from_text(llm_output)
+    # Extract JSON from text
+    import re
+    import json
+    from datetime import datetime, timezone
     
-    if json_text:
-        try:
-            # Try parsing the extracted JSON
-            parsed_json = json.loads(json_text)
-            
-            # Handle both array and single object formats
-            if isinstance(parsed_json, dict):
-                test_cases = [parsed_json]
-            elif isinstance(parsed_json, list):
-                test_cases = parsed_json
-            else:
-                raise ValueError("Unexpected JSON structure")
-            
-            # Process each test case to ensure consistent structure
-            processed_cases = []
-            for tc in test_cases:
-                # Create a standardized test case with required fields
-                processed_tc = {
-                    "id": sanitize_id(tc.get("id", "")),
-                    "title": tc.get("title", ""),
-                    "createdDate": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "status": "Active",
-                    "version": "1.0"
-                }
-                
-                # Handle steps field which could be string or array
-                steps = tc.get("steps", "")
-                if isinstance(steps, list):
-                    processed_tc["steps"] = "\n".join(steps)
-                else:
-                    processed_tc["steps"] = steps
-                
-                # Handle expectedResults field which could be string or array
-                expected_results = tc.get("expectedResults", "")
-                if isinstance(expected_results, list):
-                    processed_tc["expectedResults"] = "\n".join(expected_results)
-                else:
-                    processed_tc["expectedResults"] = expected_results
-                
-                # Generate ID if missing or invalid
-                if not processed_tc["id"]:
-                    processed_tc["id"] = f"TC-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                
-                processed_cases.append(processed_tc)
-            
-            return processed_cases
+    # Try to find JSON array in the text
+    json_match = re.search(r'```(?:json)?\s*(\[[\s\S]*?\])\s*```', llm_output)
+    if json_match:
+        json_text = json_match.group(1)
+    else:
+        # Try to find any JSON array
+        json_match = re.search(r'\[\s*\{\s*"(?:id|testCaseId)"[\s\S]*?\}\s*\]', llm_output)
+        if json_match:
+            json_text = json_match.group(0)
+        else:
+            print("No JSON found in the output")
+            return []
+    
+    try:
+        # Parse the JSON
+        parsed_json = json.loads(json_text)
         
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing failed: {e}")
-    
-    # If JSON parsing fails, fall back to existing text parsing
-    print("Falling back to traditional text parsing")
-    return parse_test_cases_from_text(llm_output)
+        # Process test cases
+        processed_cases = []
+        for tc in parsed_json:
+            processed_tc = {
+                # Map field names, supporting both formats
+                "id": tc.get("id", tc.get("testCaseId", "")),
+                "title": tc.get("title", tc.get("testCaseTitle", "")),
+                "steps": format_steps(tc.get("steps", tc.get("testSteps", ""))),
+                "expectedResults": tc.get("expectedResults", tc.get("expected_results", 
+                                       tc.get("expectedResult", ""))),
+                "createdDate": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "status": "Active",
+                "version": "1.0"
+            }
+            
+            # Only include valid test cases
+            if processed_tc["id"] and processed_tc["title"] and processed_tc["steps"] and processed_tc["expectedResults"]:
+                processed_cases.append(processed_tc)
+            else:
+                print(f"Skipping test case with ID {processed_tc['id']} - missing required fields")
+                
+        return processed_cases
+        
+    except json.JSONDecodeError as e:
+        print(f"JSON parsing failed: {e}")
+        return []
+
+
+def format_steps(steps):
+    """Format steps consistently regardless of input format."""
+    if isinstance(steps, list):
+        return "\n".join(steps)
+    return steps
 
 def sanitize_id(id_string):
     """

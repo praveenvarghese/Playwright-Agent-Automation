@@ -22,14 +22,7 @@ FEATURE_REQUIREMENT_FILE = os.path.join(PROMPTS_DIR, "feature_requirement.txt")
 
 async def generate_test_cases(similar_cases=None):
     """
-    Enhanced test case generation with response logging:
-    Step 1: Load prompts from files
-    Step 2: Include similar test cases as context
-    Step 3: Generate test cases using prompt and context
-    Step 4: Save raw generator response
-    Step 5: Get critic review using prompt
-    Step 6: Save raw critic response
-    Step 7: Save final test cases
+    Enhanced test case generation with controlled iterations between generator and critic.
     
     Args:
         similar_cases (list): Optional list of similar test cases to use as context
@@ -37,9 +30,11 @@ async def generate_test_cases(similar_cases=None):
     Returns:
         str: Generated test cases
     """
-    print("🔹 Generating test cases... Please wait.")
+    from config.config import TEST_CASE_ITERATIONS
+    
+    print(f"🔹 Generating test cases with {TEST_CASE_ITERATIONS} refinement iterations... Please wait.")
 
-    # Step 1: Load prompts from files
+    # Load prompts and requirements
     try:
         with open(GENERATOR_PROMPT_FILE, "r", encoding="utf-8") as f:
             generator_prompt = f.read()
@@ -53,19 +48,18 @@ async def generate_test_cases(similar_cases=None):
         print(f"❌ Error: Prompt file not found - {e}")
         return None
     
-    combined_prompt = f"""
-        I'll create test cases based on this feature requirement:
-
-        {feature_requirement}
-
-        Using the following template:
-
-        {generator_prompt}
-
-        Combine the feature_requirement and the generator_prompt to create a new prompt for the test case generation.
-        """
+    # Parse acceptance criteria
+    try:
+        from src.vector_search.feature_processor import FeatureProcessor
+        feature_processor = FeatureProcessor()
+        parsed_requirement = feature_processor.read_feature_requirement(FEATURE_REQUIREMENT_FILE)
+        acceptance_criteria = parsed_requirement.get('acceptance_criteria', [])
+        acceptance_criteria_text = "\n".join([f"- {criteria}" for criteria in acceptance_criteria])
+    except Exception as e:
+        print(f"Warning: Could not parse acceptance criteria: {e}")
+        acceptance_criteria_text = ""
     
-    # Step 2: Prepare context with similar test cases
+    # Prepare context with similar test cases
     context = ""
     if similar_cases and len(similar_cases) > 0:
         context = "\n\nREFERENCE TEST CASES:\n"
@@ -76,54 +70,103 @@ async def generate_test_cases(similar_cases=None):
             context += f"Steps:\n{case.get('steps', 'None')}\n"
             context += f"Expected Results:\n{case.get('expectedResults', 'None')}\n"
     
-    # Step 3: Generate Test Cases using the prompt and context
-    enhanced_prompt = combined_prompt + context
-    
-    if context:
-        enhanced_prompt += "\n\nPlease use the reference test cases as examples for format and completeness, but create new test cases specific to the requirements above."
-    
-    # Generate test cases (no token tracking)
-    test_cases = await TestCaseAgent.a_generate_reply(
-        messages=[{"role": "user", "content": enhanced_prompt}]
-    )
-    test_cases_content = test_cases  # Store the generated content
-    
-    # Step 4: Save raw generator response
-    with open(RAW_GENERATOR_RESPONSE_FILE, "w", encoding="utf-8") as f:
-        f.write(test_cases_content)
-    print(f"Raw generator response saved to {RAW_GENERATOR_RESPONSE_FILE}")
-    
-    # Step 5: Send test cases to Critic for review using the critic prompt
-    print("🔹 Sending test cases to the critic for review...")
-    
-    critic_task = f"""
-    {critic_prompt}
-    
-    REVIEW THESE TEST CASES:
-    
-    {test_cases_content}
+    # Create initial prompt
+    combined_prompt = f"""
+    I'll create test cases based on this feature requirement:
+
+    {feature_requirement}
+
+    Using the following template:
+
+    {generator_prompt}
+    {context}
     """
     
-    # Get critic review (no token tracking)
-    reviewed_test_cases = await TestCaseCritic.a_generate_reply(
-        messages=[{"role": "user", "content": critic_task}]
+    # Initial test case generation
+    current_test_cases = await TestCaseAgent.a_generate_reply(
+        messages=[{"role": "user", "content": combined_prompt}]
     )
     
-    final_test_cases_content = reviewed_test_cases  # Store the final version
+    # Save raw generator response
+    with open(RAW_GENERATOR_RESPONSE_FILE, "w", encoding="utf-8") as f:
+        f.write(current_test_cases)
+    print(f"Initial test cases saved to {RAW_GENERATOR_RESPONSE_FILE}")
     
-    # Step 6: Save raw critic response
-    with open(RAW_CRITIC_RESPONSE_FILE, "w", encoding="utf-8") as f:
-        f.write(final_test_cases_content)
-    print(f"Raw critic response saved to {RAW_CRITIC_RESPONSE_FILE}")
+    # Prepare critic prompt with acceptance criteria
+    # Instead of using replace, we'll insert the criteria directly
+    critic_prompt_with_criteria = critic_prompt
+    if "{acceptance_criteria}" in critic_prompt:
+        critic_prompt_with_criteria = critic_prompt.replace("{acceptance_criteria}", acceptance_criteria_text)
+    else:
+        # If placeholder not found, add criteria at the end
+        critic_prompt_with_criteria = critic_prompt + f"\n\nAcceptance Criteria:\n{acceptance_criteria_text}"
     
-    # Step 7: Save test cases AFTER Critic review
+    # Perform specified number of iterations
+    for iteration in range(1, TEST_CASE_ITERATIONS + 1):
+        print(f"🔹 Iteration {iteration}/{TEST_CASE_ITERATIONS}: Critic review...")
+        
+        # Create critic task
+        critic_task = f"""
+        {critic_prompt_with_criteria}
+        
+        REVIEW THESE TEST CASES:
+        
+        {current_test_cases}
+        
+        Focus on ensuring all acceptance criteria are covered and suggest specific improvements.
+        """
+        
+        # Get critic review
+        critique = await TestCaseCritic.a_generate_reply(
+            messages=[{"role": "user", "content": critic_task}]
+        )
+        
+        # Save critic response for this iteration
+        critique_file = os.path.join(LOGS_DIR, f"CriticResponse_Iteration{iteration}.txt")
+        with open(critique_file, "w", encoding="utf-8") as f:
+            f.write(critique)
+        print(f"Critic feedback for iteration {iteration} saved")
+        
+        # If this is the final iteration, use the critic's response as the final output
+        if iteration == TEST_CASE_ITERATIONS:
+            final_test_cases = critique
+            break
+            
+        # Otherwise, send critique back to generator for improvement
+        print(f"🔹 Iteration {iteration}/{TEST_CASE_ITERATIONS}: Generator improvement...")
+        
+        improvement_prompt = f"""
+        You previously generated these test cases:
+        
+        {current_test_cases}
+        
+        The test case critic provided this feedback:
+        
+        {critique}
+        
+        Please improve the test cases based on this feedback. Ensure all acceptance criteria are covered:
+        
+        {acceptance_criteria_text}
+        
+        Generate the complete set of improved test cases.
+        """
+        
+        # Get improved test cases
+        current_test_cases = await TestCaseAgent.a_generate_reply(
+            messages=[{"role": "user", "content": improvement_prompt}]
+        )
+        
+        # Save generator response for this iteration
+        generator_file = os.path.join(LOGS_DIR, f"GeneratorResponse_Iteration{iteration}.txt")
+        with open(generator_file, "w", encoding="utf-8") as f:
+            f.write(current_test_cases)
+        print(f"Improved test cases for iteration {iteration} saved")
+    
+    # Save final test cases
     with open(TEST_CASES_FILE, "w", encoding="utf-8") as f:
-        f.write(final_test_cases_content)
-    
+        f.write(final_test_cases)
     print(f"Finalized test cases saved to {TEST_CASES_FILE}")
     
-    return final_test_cases_content
-
-# If you want to run this file directly for testing
+    return final_test_cases
 if __name__ == "__main__":
     asyncio.run(generate_test_cases())
