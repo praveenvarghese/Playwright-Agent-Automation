@@ -7,6 +7,7 @@ from src.vector_search.retrieval import VectorRetrievalSystem
 from src.vector_search.embeddings import EmbeddingsGenerator
 from src.vector_search.feature_processor import FeatureProcessor
 from src.utils.json_parser import parse_test_cases_from_llm_output
+from src.utils.embeddings_mapper import map_test_cases_to_criteria_with_embeddings
 
 # Define constants for all path references
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -321,8 +322,8 @@ async def process_and_store_test_cases(test_cases_content, feature_data=None):
         
         # If we have acceptance criteria, use AI to map test cases to criteria
         if acceptance_criteria:
-            print_progress("Using AI to map test cases to acceptance criteria...")
-            criteria_mapping = await map_test_cases_to_criteria_with_ai(
+            print_progress("Using embeddings-based criteria mapping...")
+            criteria_mapping = await map_test_cases_to_criteria_with_embeddings(
                 parsed_test_cases, 
                 acceptance_criteria
             )
