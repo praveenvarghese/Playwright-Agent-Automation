@@ -62,3 +62,8 @@ UICritic = autogen.AssistantAgent(
     name="UI_Critic",
     llm_config={"config_list": config_list},
 )
+
+TestCaseOptimizer = autogen.AssistantAgent(
+    name="TestCase_Optimizer",
+    llm_config={"config_list": config_list},
+)

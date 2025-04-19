@@ -6,8 +6,7 @@ from src.vector_search.embeddings import EmbeddingsGenerator
 
 async def map_test_cases_to_criteria_with_embeddings(parsed_test_cases, acceptance_criteria):
     """
-    Map test cases to acceptance criteria using embeddings-based similarity.
-    This provides accurate semantic matching based on neural understanding.
+    Map test cases to acceptance criteria using embeddings-based similarity with top-N matching.
     
     Args:
         parsed_test_cases (list): List of parsed test case dictionaries
@@ -56,49 +55,60 @@ async def map_test_cases_to_criteria_with_embeddings(parsed_test_cases, acceptan
             print(f"⚠️ Failed to generate embedding for test case {test_case_id}")
             continue
         
-        # Find matching criteria based on cosine similarity
-        matched_criteria = []
+        # Calculate similarity with all criteria and store in a list
+        all_similarities = []
         for criteria in criteria_embeddings:
             similarity = calculate_cosine_similarity(
                 test_case_embedding, 
                 criteria["embedding"]
             )
-            
-            # Use a threshold to determine matches
-            # This threshold can be adjusted based on testing
-            if similarity > 0.80:  # Slightly lower threshold to ensure matches
-                matched_criteria.append({
-                    "criteriaId": criteria["id"],
-                    "description": criteria["description"],
-                    "status": "Active",
-                    "similarity": similarity  # Include for debugging/logging
-                })
+            all_similarities.append({
+                "criteriaId": criteria["id"],
+                "description": criteria["description"], 
+                "status": "Active",
+                "similarity": similarity
+            })
         
         # Sort by similarity (highest first)
-        matched_criteria.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+        all_similarities.sort(key=lambda x: x["similarity"], reverse=True)
         
-        # Remove similarity field before storing
-        for criteria in matched_criteria:
-            criteria.pop("similarity", None)
+        # Take only the top N most similar criteria that meet minimum threshold
+        matched_criteria = []
+        top_n = 3  # Set this to your desired number
+        min_threshold = 0.65  # Set this to your minimum acceptable similarity
+        
+        # Debug output
+        print(f"🔹 Top similarities for test case {test_case_id}:")
+        for i, criteria in enumerate(all_similarities[:5]):  # Show top 5 for debugging
+            print(f"   - {criteria['criteriaId']}: {criteria['similarity']:.4f} - {criteria['description'][:30]}...")
+        
+        for criteria in all_similarities[:top_n]:  # Only check top N
+            if criteria["similarity"] >= min_threshold:  # Apply minimum threshold
+                # Make a copy without the similarity field
+                match = {
+                    "criteriaId": criteria["criteriaId"],
+                    "description": criteria["description"],
+                    "status": "Active"
+                }
+                matched_criteria.append(match)
+                print(f"✅ Matched test case {test_case_id} to criteria {criteria['criteriaId']} (similarity: {criteria['similarity']:.4f})")
         
         if matched_criteria:
             mapping[test_case_id] = matched_criteria
             print(f"✅ Mapped test case {test_case_id} to {len(matched_criteria)} criteria")
         else:
-            # If no match found even with a lower threshold, map to all criteria
-            # This ensures every test case has at least some mapping
             print(f"⚠️ Could not match test case {test_case_id} to any criteria with confidence")
-            print(f"   Adding mappings to all criteria with lower confidence")
-            
-            # Map to all criteria
-            for i, criteria in enumerate(acceptance_criteria):
-                matched_criteria.append({
-                    "criteriaId": f"AC-{i+1:03d}",
-                    "description": criteria,
+            # Instead of mapping to all criteria, try to find at least one with best effort
+            if all_similarities:
+                # Take the best match even if below threshold
+                best_match = all_similarities[0]
+                match = {
+                    "criteriaId": best_match["criteriaId"],
+                    "description": best_match["description"],
                     "status": "Active"
-                })
-            
-            mapping[test_case_id] = matched_criteria
+                }
+                mapping[test_case_id] = [match]
+                print(f"🔹 Using best effort match for test case {test_case_id}: {best_match['criteriaId']} (similarity: {best_match['similarity']:.4f})")
     
     print(f"✅ Successfully mapped {len(mapping)} test cases to criteria")
     return mapping
@@ -112,11 +122,16 @@ def calculate_cosine_similarity(embedding1, embedding2):
         embedding2 (list): Second embedding vector
         
     Returns:
-        float: Cosine similarity (between -1 and 1)
+        float: Cosine similarity (between 0 and 1)
     """
     # Convert to numpy arrays
+    import numpy as np
     a = np.array(embedding1)
     b = np.array(embedding2)
     
     # Calculate cosine similarity
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+    similarity = np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+    
+    # Ensure the result is between 0 and 1
+    return max(0.0, min(1.0, similarity))
+   

@@ -1,6 +1,6 @@
 import asyncio
 import os
-from config.config import TestCaseAgent, TestCaseCritic
+from config.config import TestCaseAgent, TestCaseCritic, TestCaseOptimizer
 
 # Define paths using project structure
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -20,19 +20,19 @@ RAW_GENERATOR_RESPONSE_FILE = os.path.join(LOGS_DIR, "RawGeneratorResponse.txt")
 RAW_CRITIC_RESPONSE_FILE = os.path.join(LOGS_DIR, "RawCriticResponse.txt")
 FEATURE_REQUIREMENT_FILE = os.path.join(PROMPTS_DIR, "feature_requirement.txt")
 
-async def generate_test_cases(similar_cases=None):
+
+async def generate_test_cases(similar_cases=None, max_iterations=2):
     """
-    Enhanced test case generation with controlled iterations between generator and critic.
+    Enhanced test case generation with iterative refinement and optimization:
     
     Args:
         similar_cases (list): Optional list of similar test cases to use as context
+        max_iterations (int): Maximum number of generator-critic iterations
         
     Returns:
         str: Generated test cases
     """
-    from config.config import TEST_CASE_ITERATIONS
-    
-    print(f"🔹 Generating test cases with {TEST_CASE_ITERATIONS} refinement iterations... Please wait.")
+    print("🔹 Generating test cases with refinement and optimization... Please wait.")
 
     # Load prompts and requirements
     try:
@@ -44,6 +44,11 @@ async def generate_test_cases(similar_cases=None):
         
         with open(CRITIC_PROMPT_FILE, "r", encoding="utf-8") as f:
             critic_prompt = f.read()
+            
+        # Add this new prompt file
+        OPTIMIZER_PROMPT_FILE = os.path.join(PROMPTS_DIR, "optimizer_prompt.txt")
+        with open(OPTIMIZER_PROMPT_FILE, "r", encoding="utf-8") as f:
+            optimizer_prompt = f.read()
     except FileNotFoundError as e:
         print(f"❌ Error: Prompt file not found - {e}")
         return None
@@ -59,7 +64,7 @@ async def generate_test_cases(similar_cases=None):
         print(f"Warning: Could not parse acceptance criteria: {e}")
         acceptance_criteria_text = ""
     
-    # Prepare context with similar test cases
+    # Prepare context
     context = ""
     if similar_cases and len(similar_cases) > 0:
         context = "\n\nREFERENCE TEST CASES:\n"
@@ -93,7 +98,6 @@ async def generate_test_cases(similar_cases=None):
     print(f"Initial test cases saved to {RAW_GENERATOR_RESPONSE_FILE}")
     
     # Prepare critic prompt with acceptance criteria
-    # Instead of using replace, we'll insert the criteria directly
     critic_prompt_with_criteria = critic_prompt
     if "{acceptance_criteria}" in critic_prompt:
         critic_prompt_with_criteria = critic_prompt.replace("{acceptance_criteria}", acceptance_criteria_text)
@@ -101,9 +105,17 @@ async def generate_test_cases(similar_cases=None):
         # If placeholder not found, add criteria at the end
         critic_prompt_with_criteria = critic_prompt + f"\n\nAcceptance Criteria:\n{acceptance_criteria_text}"
     
+    # Prepare optimizer prompt with acceptance criteria
+    optimizer_prompt_with_criteria = optimizer_prompt
+    if "{acceptance_criteria}" in optimizer_prompt:
+        optimizer_prompt_with_criteria = optimizer_prompt.replace("{acceptance_criteria}", acceptance_criteria_text)
+    else:
+        # If placeholder not found, add criteria at the end
+        optimizer_prompt_with_criteria = optimizer_prompt + f"\n\nAcceptance Criteria:\n{acceptance_criteria_text}"
+    
     # Perform specified number of iterations
-    for iteration in range(1, TEST_CASE_ITERATIONS + 1):
-        print(f"🔹 Iteration {iteration}/{TEST_CASE_ITERATIONS}: Critic review...")
+    for iteration in range(1, max_iterations + 1):
+        print(f"🔹 Iteration {iteration}/{max_iterations}: Critic review...")
         
         # Create critic task
         critic_task = f"""
@@ -127,13 +139,13 @@ async def generate_test_cases(similar_cases=None):
             f.write(critique)
         print(f"Critic feedback for iteration {iteration} saved")
         
-        # If this is the final iteration, use the critic's response as the final output
-        if iteration == TEST_CASE_ITERATIONS:
-            final_test_cases = critique
+        # If this is the final iteration, proceed to optimization
+        if iteration == max_iterations:
+            final_critique = critique
             break
             
         # Otherwise, send critique back to generator for improvement
-        print(f"🔹 Iteration {iteration}/{TEST_CASE_ITERATIONS}: Generator improvement...")
+        print(f"🔹 Iteration {iteration}/{max_iterations}: Generator improvement...")
         
         improvement_prompt = f"""
         You previously generated these test cases:
@@ -161,6 +173,32 @@ async def generate_test_cases(similar_cases=None):
         with open(generator_file, "w", encoding="utf-8") as f:
             f.write(current_test_cases)
         print(f"Improved test cases for iteration {iteration} saved")
+    
+    # Add the optimizer step after completing iterations
+    print("🔹 Optimizing test cases to reduce redundancy...")
+    
+    # Create optimizer task
+    optimizer_task = f"""
+    {optimizer_prompt_with_criteria}
+    
+    OPTIMIZE THESE TEST CASES:
+    
+    {final_critique}
+    """
+    
+    # Get optimizer review
+    optimized_test_cases = await TestCaseOptimizer.a_generate_reply(
+        messages=[{"role": "user", "content": optimizer_task}]
+    )
+    
+    # Save optimizer response
+    optimizer_file = os.path.join(LOGS_DIR, "OptimizerResponse.txt")
+    with open(optimizer_file, "w", encoding="utf-8") as f:
+        f.write(optimized_test_cases)
+    print(f"Optimized test cases saved to {optimizer_file}")
+    
+    # Use the optimized test cases as the final output
+    final_test_cases = optimized_test_cases
     
     # Save final test cases
     with open(TEST_CASES_FILE, "w", encoding="utf-8") as f:
