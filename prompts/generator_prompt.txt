@@ -6,3 +6,7 @@ For each identified requirement, generate 2 simple test cases that include only:
 4. Expected Results: Observable outcomes
 
 Focus on the most basic, core functionality test cases. Do not include preconditions, test data, assertion points, or test categories. Keep the test cases simple and straightforward.
+
+Please provide your response in JSON format for easier processing.
+Each test case should be a JSON object with at least id, title, steps, and expectedResults fields.
+Include all test cases in a JSON array.

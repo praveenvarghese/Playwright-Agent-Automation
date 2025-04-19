@@ -6,6 +6,7 @@ from src.test_cases.generator import generate_test_cases
 from src.vector_search.retrieval import VectorRetrievalSystem
 from src.vector_search.embeddings import EmbeddingsGenerator
 from src.vector_search.feature_processor import FeatureProcessor
+from src.utils.json_parser import parse_test_cases_from_llm_output
 
 # Define constants for all path references
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -150,13 +151,14 @@ Only include the JSON response, nothing else."""
         print_error(f"Error reading criteria mapping prompt: {str(e)}")
         return None
 
-async def map_test_cases_to_criteria_with_ai(test_case_sections, acceptance_criteria):
+
+async def map_test_cases_to_criteria_with_ai(parsed_test_cases, acceptance_criteria):
     """
     Use AI to intelligently map test cases to acceptance criteria.
-    Uses an external prompt file for the mapping task.
+    Updated to work with parsed test cases instead of text sections.
     
     Args:
-        test_case_sections (list): List of test case text sections
+        parsed_test_cases (list): List of parsed test case dictionaries
         acceptance_criteria (list): List of acceptance criteria
         
     Returns:
@@ -168,7 +170,7 @@ async def map_test_cases_to_criteria_with_ai(test_case_sections, acceptance_crit
     prompt_template = await read_criteria_mapping_prompt()
     if not prompt_template:
         print_error("Failed to read criteria mapping prompt template")
-        return fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria)
+        return fallback_map_test_cases_to_criteria(parsed_test_cases, acceptance_criteria)
     
     # Prepare formatted acceptance criteria
     criteria_formatted = "\n".join([f"{i+1}. {criteria}" for i, criteria in enumerate(acceptance_criteria)])
@@ -177,15 +179,16 @@ async def map_test_cases_to_criteria_with_ai(test_case_sections, acceptance_crit
     test_cases_formatted = ""
     test_case_ids = []
     
-    # Extract IDs and prepare test cases for the prompt
-    for i, test_case in enumerate(test_case_sections):
-        # Extract ID using simple regex
-        import re
-        id_match = re.search(r'Test Case ID:[ \t]*([^\n\r]+)', test_case.replace('**', ''))
-        if id_match:
-            test_case_id = id_match.group(1).strip()
+    # Format test cases for the prompt
+    for i, test_case in enumerate(parsed_test_cases, 1):
+        test_case_id = test_case.get("id", "")
+        if test_case_id:
             test_case_ids.append(test_case_id)
-            test_cases_formatted += f"\nTest Case {i+1}:\n{test_case.strip()}\n"
+            test_cases_formatted += f"\nTest Case {i}:\n"
+            test_cases_formatted += f"ID: {test_case_id}\n"
+            test_cases_formatted += f"Title: {test_case.get('title', '')}\n"
+            test_cases_formatted += f"Steps:\n{test_case.get('steps', '')}\n"
+            test_cases_formatted += f"Expected Results:\n{test_case.get('expectedResults', '')}\n"
     
     # Fill in the prompt template
     mapping_prompt = prompt_template.replace("{acceptance_criteria}", criteria_formatted)
@@ -233,20 +236,21 @@ async def map_test_cases_to_criteria_with_ai(test_case_sections, acceptance_crit
             print_error(f"Failed to parse AI response as JSON: {e}")
             print(f"Response was: {ai_response[:200]}...")
             # Fall back to a simpler mapping approach
-            return fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria)
+            return fallback_map_test_cases_to_criteria(parsed_test_cases, acceptance_criteria)
             
     except Exception as e:
         print_error(f"Error while using AI for mapping: {str(e)}")
         # Fall back to a simpler mapping approach
-        return fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria)
+        return fallback_map_test_cases_to_criteria(parsed_test_cases, acceptance_criteria)
 
-def fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria):
+
+def fallback_map_test_cases_to_criteria(parsed_test_cases, acceptance_criteria):
     """
     Fallback method to map test cases to criteria using keyword matching.
-    Used when AI mapping fails.
+    Updated to work with parsed test cases instead of text sections.
     
     Args:
-        test_case_sections (list): List of test case text sections
+        parsed_test_cases (list): List of parsed test case dictionaries
         acceptance_criteria (list): List of acceptance criteria
         
     Returns:
@@ -255,16 +259,17 @@ def fallback_map_test_cases_to_criteria(test_case_sections, acceptance_criteria)
     print_warning("Using fallback method for mapping test cases to criteria")
     mapping = {}
     
-    for test_case in test_case_sections:
-        # Extract ID
-        import re
-        test_case = test_case.replace('**', '')
-        id_match = re.search(r'Test Case ID:[ \t]*([^\n\r]+)', test_case)
-        if not id_match:
+    for test_case in parsed_test_cases:
+        test_case_id = test_case.get("id")
+        if not test_case_id:
             continue
             
-        test_case_id = id_match.group(1).strip()
-        test_case_content = test_case.lower()
+        # Combine all test case text for matching
+        test_case_content = (
+            test_case.get("title", "") + " " + 
+            test_case.get("steps", "") + " " + 
+            test_case.get("expectedResults", "")
+        ).lower()
         
         # Find matching criteria
         criteria_matches = []
@@ -295,21 +300,11 @@ async def process_and_store_test_cases(test_cases_content, feature_data=None):
     """Process the generated test cases and store them in the database."""
     print_progress("Processing and uploading test cases...")
     
-    # Split the content into individual test cases
-    test_case_sections = []
-    current_section = ""
+    # Parse test cases from LLM output using the improved JSON parser
+    from src.utils.json_parser import parse_test_cases_from_llm_output
+    parsed_test_cases = parse_test_cases_from_llm_output(test_cases_content)
     
-    for line in test_cases_content.split('\n'):
-        if ("Test Case ID:" in line or "ID:" in line) and current_section:
-            test_case_sections.append(current_section)
-            current_section = line + "\n"
-        else:
-            current_section += line + "\n"
-    
-    if current_section:
-        test_case_sections.append(current_section)
-    
-    print_progress(f"Found {len(test_case_sections)} test cases in the generated content")
+    print_progress(f"Found {len(parsed_test_cases)} test cases in the generated content")
     
     # Process each test case
     embeddings_generator = EmbeddingsGenerator()
@@ -328,43 +323,39 @@ async def process_and_store_test_cases(test_cases_content, feature_data=None):
         if acceptance_criteria:
             print_progress("Using AI to map test cases to acceptance criteria...")
             criteria_mapping = await map_test_cases_to_criteria_with_ai(
-                test_case_sections, 
+                parsed_test_cases, 
                 acceptance_criteria
             )
     
-    for i, test_case_text in enumerate(test_case_sections, 1):  # Start index from 1
-        if not test_case_text.strip():
+    for i, parsed_case in enumerate(parsed_test_cases, 1):  # Start index from 1
+        if not parsed_case.get("id"):
+            print_error(f"  Missing ID for test case {i}, skipping")
             continue
             
         print(f"Processing test case {i}...")
-        parsed_case = embeddings_generator.parse_test_case_from_text(test_case_text)
+        print(f"  ID: {parsed_case.get('id')}")
+        print(f"  Title: {parsed_case.get('title', '')}")
         
-        if parsed_case.get("id"):
-            print(f"  ID: {parsed_case.get('id')}")
-            print(f"  Title: {parsed_case.get('title', '')}")
+        # Add feature metadata if available
+        if feature_data:
+            parsed_case["featureMetadata"] = {
+                "featureId": feature_data["id"],
+                "lastUpdated": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+            }
             
-            # Add feature metadata if available
-            if feature_data:
-                parsed_case["featureMetadata"] = {
-                    "featureId": feature_data["id"],
-                    "lastUpdated": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-                }
-                
-                # Add criteria metadata from AI mapping
-                if acceptance_criteria and parsed_case["id"] in criteria_mapping:
-                    parsed_case["criteriaMetadata"] = criteria_mapping[parsed_case["id"]]
-                    print(f"  Mapped to {len(parsed_case['criteriaMetadata'])} acceptance criteria")
-            
-            success = embeddings_generator.upload_test_case(parsed_case)
-            if success:
-                stored_count += 1
-                processed_test_cases.append(parsed_case)
-                test_case_ids.append(parsed_case.get("id"))
-                print_success(f"  Successfully uploaded test case {i}")
-            else:
-                print_warning(f"  Failed to upload test case {i}")
+            # Add criteria metadata from AI mapping
+            if acceptance_criteria and parsed_case["id"] in criteria_mapping:
+                parsed_case["criteriaMetadata"] = criteria_mapping[parsed_case["id"]]
+                print(f"  Mapped to {len(parsed_case['criteriaMetadata'])} acceptance criteria")
+        
+        success = embeddings_generator.upload_test_case(parsed_case)
+        if success:
+            stored_count += 1
+            processed_test_cases.append(parsed_case)
+            test_case_ids.append(parsed_case.get("id"))
+            print_success(f"  Successfully uploaded test case {i}")
         else:
-            print_error(f"  Failed to parse a valid ID for test case {i}")
+            print_warning(f"  Failed to upload test case {i}")
     
     print_success(f"Successfully stored {stored_count} test cases in the vector database.")
     
@@ -397,3 +388,4 @@ async def process_and_store_test_cases(test_cases_content, feature_data=None):
                 for criteria in case.get("criteriaMetadata", []):
                     f.write(f"  - {criteria.get('criteriaId', 'Unknown')}: {criteria.get('description', 'None')}\n")
             f.write("\n---\n\n")
+
