@@ -74,8 +74,8 @@ async def map_test_cases_to_criteria_with_embeddings(parsed_test_cases, acceptan
         
         # Take only the top N most similar criteria that meet minimum threshold
         matched_criteria = []
-        top_n = 3  # Set this to your desired number
-        min_threshold = 0.65  # Set this to your minimum acceptable similarity
+        top_n = 5  # Set this to your desired number
+        min_threshold = 0.80  # Set this to your minimum acceptable similarity
         
         # Debug output
         print(f"🔹 Top similarities for test case {test_case_id}:")

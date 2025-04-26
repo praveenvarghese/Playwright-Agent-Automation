@@ -8,6 +8,8 @@ from src.vector_search.retrieval import VectorRetrievalSystem
 from src.vector_search.embeddings import EmbeddingsGenerator
 from src.vector_search.feature_processor import FeatureProcessor
 from src.utils.test_case_analyzer import analyze_test_cases_with_embeddings
+from src.utils.json_parser import format_steps
+   
 
 # Helper functions for message formatting (reusing from test_case_workflow.py)
 def print_progress(message): print(f"🔹 {message}")
@@ -16,10 +18,10 @@ def print_warning(message): print(f"⚠️ {message}")
 def print_error(message): print(f"❌ {message}")
 
 
-def analyze_criteria_changes(original_criteria, new_criteria_list):
+async def analyze_criteria_changes(original_criteria, new_criteria_list):
     """
     Analyze changes between original and new acceptance criteria.
-    Enhanced to detect re-added criteria that were previously deprecated.
+    Enhanced to use LLM for semantic understanding of requirement changes.
     
     Args:
         original_criteria (list): List of original criteria objects with id and description
@@ -57,7 +59,7 @@ def analyze_criteria_changes(original_criteria, new_criteria_list):
     matched_new_indices = set()
     
     for i, original in enumerate(active_criteria):
-        original_desc_lower = original.get("description", "").lower().strip()
+        original_desc_lower = active_desc_list[i]
         
         for j, new_desc_lower in enumerate(new_desc_list):
             if original_desc_lower == new_desc_lower and j not in matched_new_indices:
@@ -70,7 +72,7 @@ def analyze_criteria_changes(original_criteria, new_criteria_list):
     matched_deprecated_indices = set()
     
     for i, deprecated in enumerate(deprecated_criteria):
-        deprecated_desc_lower = deprecated.get("description", "").lower().strip()
+        deprecated_desc_lower = deprecated_desc_list[i]
         
         for j, new_desc_lower in enumerate(new_desc_list):
             if j in matched_new_indices:
@@ -79,18 +81,18 @@ def analyze_criteria_changes(original_criteria, new_criteria_list):
             # Check for exact match or high similarity
             if deprecated_desc_lower == new_desc_lower or calculate_text_similarity(deprecated_desc_lower, new_desc_lower) > 0.9:
                 # This is a previously deprecated criteria that's being added back
-                result["reactivated"].append((deprecated, new_desc_lower))
+                result["reactivated"].append((deprecated, new_criteria_list[j]))
                 matched_deprecated_indices.add(i)
                 matched_new_indices.add(j)
                 print(f"🔹 Found reactivated criteria: {deprecated.get('id')} - {deprecated_desc_lower[:50]}...")
                 break
     
-    # Step 3: Find similar criteria (modified)
+    # Step 3: Use LLM to compare remaining criteria for semantic differences
     for i, original in enumerate(active_criteria):
         if i in matched_active_indices:
             continue
             
-        original_desc_lower = original.get("description", "").lower().strip()
+        original_desc = original.get("description", "")
         
         best_match_idx = -1
         best_match_score = 0.7  # Minimum similarity threshold
@@ -99,13 +101,36 @@ def analyze_criteria_changes(original_criteria, new_criteria_list):
             if j in matched_new_indices:
                 continue
                 
-            score = calculate_text_similarity(original_desc_lower, new_desc_lower)
+            # First use simple similarity to filter obvious non-matches
+            score = calculate_text_similarity(active_desc_list[i], new_desc_lower)
             
-            if score > best_match_score:
+            if score > 0.5:  # If there's basic similarity, check semantic meaning with LLM
+                # Use LLM to compare the criteria semantically
+                comparison = await compare_criteria_with_llm(original_desc, new_criteria_list[j])
+                
+                if comparison["is_same_meaning"]:
+                    # They have the same meaning according to LLM, mark as unchanged
+                    result["unchanged"].append(original)
+                    matched_active_indices.add(i)
+                    matched_new_indices.add(j)
+                    print(f"🔹 LLM found semantically equivalent criteria: {original.get('id')}")
+                    break
+                else:
+                    # They are different but related, mark as modified
+                    result["modified"].append((original, new_criteria_list[j]))
+                    matched_active_indices.add(i)
+                    matched_new_indices.add(j)
+                    print(f"🔹 LLM detected modified criteria: {original.get('id')}")
+                    print(f"   - Significance: {comparison['significance']}")
+                    break
+            
+            # If we haven't found a semantic match but there's high lexical similarity
+            elif score > best_match_score:
                 best_match_score = score
                 best_match_idx = j
         
-        if best_match_idx >= 0:
+        # If no semantic match found but we have a good lexical match
+        if i not in matched_active_indices and best_match_idx >= 0:
             result["modified"].append((original, new_criteria_list[best_match_idx]))
             matched_active_indices.add(i)
             matched_new_indices.add(best_match_idx)
@@ -165,7 +190,7 @@ async def update_feature_workflow(feature_data):
             print(f"⚠️ Some errors occurred during relationship repair, but continuing with update")
         
         # Step 2: Analyze acceptance criteria changes
-        criteria_changes = analyze_criteria_changes(
+        criteria_changes = await analyze_criteria_changes(
             original_criteria=original_feature.get('acceptanceCriteria', []),
             new_criteria_list=feature_data.get('acceptance_criteria', [])
         )
@@ -264,7 +289,33 @@ async def update_feature_workflow(feature_data):
                 reason="Criteria removed or significantly changed"
             )
         
-        # Step 7c: Reactivate previously inactive criteria in test cases
+        # Step 7c: Update content for test cases that need updates
+        if test_case_decision['keep_with_updates']:
+            embeddings_generator = EmbeddingsGenerator()
+            # Create a list of criteria changes with old and new versions
+            modified_criteria_pairs = []
+            for original, new_description in criteria_changes['modified']:
+                modified_criteria_pairs.append((original, new_description))
+            
+            # Update the test case content
+            updated_test_cases = await update_test_case_content(
+                test_case_decision['keep_with_updates'], 
+                modified_criteria_pairs
+            )
+            
+            # Store the updated test cases
+            updated_count = 0
+            for updated_tc in updated_test_cases:
+                success = embeddings_generator.upload_test_case(updated_tc)
+                if success:
+                    updated_count += 1
+                    print(f"✅ Successfully uploaded updated test case {updated_tc.get('id')}")
+                else:
+                    print(f"⚠️ Failed to upload updated test case {updated_tc.get('id')}")
+            
+            print(f"✅ Updated content for {updated_count} test cases")
+
+        # Step 7d: Reactivate previously inactive criteria in test cases
         if 'reactivated' in criteria_changes and criteria_changes['reactivated']:
             reactivated_ids = [reactivated[0].get('id') for reactivated in criteria_changes['reactivated']]
             
@@ -655,10 +706,28 @@ async def update_test_case_criteria_mappings(test_cases, criteria_map, feature_i
         
         # Update the test case if metadata changed or featureMetadata is missing
         needs_update = (updated_metadata != criteria_metadata) or (test_case.get("featureMetadata") is None)
-        
+
         if needs_update:
-            # Create a deep copy to avoid reference issues
-            updated_test_case = dict(test_case)
+            # Fetch the latest version from the database first
+            try:
+                latest_results = list(embeddings_generator.search_client.search(
+                    search_text="",
+                    filter=f"id eq '{test_case.get('id')}'",
+                    select=["*"]
+                ))
+                
+                if latest_results:
+                    # Start with the latest version from the database
+                    updated_test_case = dict(latest_results[0])
+                    print(f"🔹 Fetched latest version of test case {test_case.get('id')} from database")
+                else:
+                    # Fall back to original if fetch fails
+                    updated_test_case = dict(test_case)
+                    print(f"⚠️ Could not fetch latest version of test case {test_case.get('id')}")
+            except Exception as e:
+                # Log the error and use the original test case
+                print(f"⚠️ Error fetching latest test case: {str(e)}")
+                updated_test_case = dict(test_case)
             
             # Update criteria metadata if changed
             if updated_metadata != criteria_metadata:
@@ -1687,3 +1756,420 @@ async def verify_criteria_status_consistency(feature_id):
     
     print(f"✅ Fixed criteria status in {fixed_count} test cases")
     return fixed_count
+
+async def update_test_case_content(test_cases_to_update, changed_criteria):
+    """
+    Update the content of test cases based on changed criteria.
+    Enhanced with critique and optimization loops for better quality.
+    
+    Args:
+        test_cases_to_update (list): Test cases that need content updates
+        changed_criteria (list): Criteria that have been modified, with old and new versions
+        
+    Returns:
+        list: Updated test cases with modified content
+    """
+    from config.config import TestCaseAgent, TestCaseCritic, TestCaseOptimizer
+    from src.utils.json_parser import format_steps
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    PROMPTS_DIR = os.path.join(PROJECT_ROOT, "prompts")
+    LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
+    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
+
+    # Create output directory if it doesn't exist
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    print(f"🔹 Updating content of {len(test_cases_to_update)} test cases...")
+    updated_test_cases = []
+    
+    # Load the update prompt
+    UPDATE_PROMPT_FILE = os.path.join(PROMPTS_DIR, "test_case_update_prompt.txt")
+    try:
+        with open(UPDATE_PROMPT_FILE, "r", encoding="utf-8") as f:
+            update_prompt_template = f.read()
+    except FileNotFoundError:
+        print(f"❌ Error: Update prompt file not found at {UPDATE_PROMPT_FILE}")
+        return test_cases_to_update  # Return original test cases if prompt file not found
+    
+    # Load the update critic prompt
+    UPDATE_CRITIC_PROMPT_FILE = os.path.join(PROMPTS_DIR, "test_case_update_critic_prompt.txt")
+    try:
+        with open(UPDATE_CRITIC_PROMPT_FILE, "r", encoding="utf-8") as f:
+            update_critic_template = f.read()
+    except FileNotFoundError:
+        print(f"⚠️ Update critic prompt file not found at {UPDATE_CRITIC_PROMPT_FILE}")
+        # Use empty string if file not found - we'll handle this later
+        update_critic_template = ""
+
+    # Load the update optimizer prompt
+    UPDATE_OPTIMIZER_PROMPT_FILE = os.path.join(PROMPTS_DIR, "test_case_update_optimizer_prompt.txt")
+    try:
+        with open(UPDATE_OPTIMIZER_PROMPT_FILE, "r", encoding="utf-8") as f:
+            update_optimizer_template = f.read()
+    except FileNotFoundError:
+        print(f"⚠️ Update optimizer prompt file not found at {UPDATE_OPTIMIZER_PROMPT_FILE}")
+        # Use empty string if file not found - we'll handle this later
+        update_optimizer_template = ""
+    
+    # Maximum number of iterations for the critique-update loop
+    max_iterations = 2
+    
+    for test_case in test_cases_to_update:
+        test_case_id = test_case.get("id")
+        print(f"🔹 Updating content for test case {test_case_id}")
+        
+        # Get the criteria that affect this test case
+        criteria_metadata = test_case.get("criteriaMetadata", []) or []
+        relevant_changes = []
+        
+        for criteria_change in changed_criteria:
+            old_criteria, new_criteria = criteria_change
+            old_id = old_criteria.get("id")
+            
+            # Check if this test case is mapped to the changed criteria
+            for criteria in criteria_metadata:
+                if criteria.get("criteriaId") == old_id:
+                    relevant_changes.append({
+                        "old": old_criteria.get("description"),
+                        "new": new_criteria
+                    })
+        
+        if not relevant_changes:
+            print(f"⚠️ No relevant criteria changes found for test case {test_case_id}, skipping content update")
+            updated_test_cases.append(test_case)
+            continue
+        
+        # Format the changed requirements section
+        changed_requirements = ""
+        for change in relevant_changes:
+            changed_requirements += f"OLD: {change['old']}\n"
+            changed_requirements += f"NEW: {change['new']}\n\n"
+        
+        # Prepare test case in JSON format for processing
+        test_case_json = json.dumps({
+            "id": test_case.get("id"),
+            "title": test_case.get("title"),
+            "steps": test_case.get("steps").split("\n") if isinstance(test_case.get("steps"), str) else test_case.get("steps"),
+            "expectedResults": test_case.get("expectedResults")
+        }, indent=2)
+        
+        # Initial update generation - use the template
+        update_prompt = update_prompt_template.replace("{test_case_id}", test_case.get("id", ""))
+        update_prompt = update_prompt.replace("{test_case_title}", test_case.get("title", ""))
+        update_prompt = update_prompt.replace("{test_case_steps}", test_case.get("steps", ""))
+        update_prompt = update_prompt.replace("{test_case_expected_results}", test_case.get("expectedResults", ""))
+        update_prompt = update_prompt.replace("{changed_requirements}", changed_requirements)
+        
+        # Initial generation
+        current_test_case = test_case_json
+        
+        for iteration in range(1, max_iterations + 1):
+            print(f"  🔄 Update iteration {iteration}/{max_iterations}")
+            
+            # Generate updated test case
+            try:
+                response = await TestCaseAgent.a_generate_reply(
+                    messages=[{"role": "user", "content": update_prompt}]
+                )
+                
+                # Save the response for debugging
+                update_response_file = os.path.join(LOGS_DIR, f"update_response_{test_case_id}_iter{iteration}.txt")
+                with open(update_response_file, "w", encoding="utf-8") as f:
+                    f.write(response)
+                
+                # Extract JSON from response
+                import re
+                json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response)
+                if not json_match:
+                    json_match = re.search(r'(\{[\s\S]*?\})', response)
+                
+                if json_match:
+                    current_test_case = json_match.group(1)
+                else:
+                    print(f"⚠️ Could not extract JSON from response for test case {test_case_id}")
+                    break
+                    
+                # If this is the final iteration, skip critique
+                if iteration == max_iterations:
+                    break
+                
+                # Add critique step using the template
+                if update_critic_template:
+                    critique_prompt = update_critic_template.replace("{current_test_case}", current_test_case)
+                    critique_prompt = critique_prompt.replace("{changed_requirements}", changed_requirements)
+                else:
+                    # Fall back to hardcoded prompt if file not found
+                    critique_prompt = f"""
+                    You are a test case reviewer. Review this updated test case and ensure it properly reflects the requirement changes.
+
+                    Updated Test Case:
+                    ```json
+                    {current_test_case}
+                    ```
+
+                    The requirements that changed:
+                    {changed_requirements}
+
+                    Check for:
+                    1. Does the test case title reflect the new requirements?
+                    2. Do the test steps implement the new requirements correctly?
+                    3. Do the expected results align with the new requirements?
+                    4. Is there any inconsistency between title, steps, and expected results?
+                    5. Does the test case actually test the new requirements properly?
+
+                    If you find any issues, provide specific feedback about what needs to be fixed.
+                    """
+                
+                # Get critique
+                critique = await TestCaseCritic.a_generate_reply(
+                    messages=[{"role": "user", "content": critique_prompt}]
+                )
+                
+                # Save critique for debugging
+                critique_file = os.path.join(LOGS_DIR, f"update_critique_{test_case_id}_iter{iteration}.txt")
+                with open(critique_file, "w", encoding="utf-8") as f:
+                    f.write(critique)
+                
+                # Update the prompt for next iteration
+                update_prompt = f"""
+                You previously updated this test case:
+                ```json
+                {current_test_case}
+                ```
+
+                However, the critic found these issues:
+                {critique}
+
+                Original requirements change:
+                {changed_requirements}
+
+                Please fix ALL the issues identified by the critic and provide a fully updated test case. Make sure:
+                1. ALL parts of the test case (title, steps, expected results) are updated
+                2. ALL parts are consistent with each other
+                3. The test case properly implements the NEW requirements
+
+                Return the improved test case in the same JSON format.
+                """
+                
+            except Exception as e:
+                print(f"⚠️ Error in update iteration {iteration}: {str(e)}")
+                break
+        
+        # Add optimizer step after the critique-update loops
+        try:
+            # Create optimizer prompt using template
+            if update_optimizer_template:
+                optimizer_prompt = update_optimizer_template.replace("{current_test_case}", current_test_case)
+                optimizer_prompt = optimizer_prompt.replace("{changed_requirements}", changed_requirements)
+            else:
+                # Fall back to hardcoded prompt if file not found
+                optimizer_prompt = f"""
+                You are a Test Case Optimizer. Optimize this test case to ensure it perfectly aligns with the new requirements.
+
+                Test Case:
+                ```json
+                {current_test_case}
+                ```
+
+                The requirements that changed:
+                {changed_requirements}
+
+                Your task is to:
+                1. Ensure perfect consistency between title, steps, and expected results
+                2. Make sure the test case effectively tests the NEW requirements
+                3. Polish the language for clarity and precision
+                4. Remove any remaining traces of the old requirements
+                5. Ensure environment names follow the new format requirements
+
+                Return the optimized test case in the same JSON format.
+                """
+            
+            # Get optimized version
+            optimized_response = await TestCaseOptimizer.a_generate_reply(
+                messages=[{"role": "user", "content": optimizer_prompt}]
+            )
+            
+            # Save optimizer response for debugging
+            optimizer_file = os.path.join(LOGS_DIR, f"update_optimizer_{test_case_id}.txt")
+            with open(optimizer_file, "w", encoding="utf-8") as f:
+                f.write(optimized_response)
+            
+            # Extract JSON from optimized response
+            json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', optimized_response)
+            if not json_match:
+                json_match = re.search(r'(\{[\s\S]*?\})', optimized_response)
+            
+            if json_match:
+                optimized_test_case = json_match.group(1)
+                
+                # Extract the optimized test case
+                try:
+                    updated_tc = json.loads(optimized_test_case)
+                except json.JSONDecodeError:
+                    print(f"⚠️ Failed to parse optimized JSON for test case {test_case_id}")
+                    # Fall back to pre-optimized version
+                    try:
+                        updated_tc = json.loads(current_test_case)
+                    except json.JSONDecodeError:
+                        print(f"⚠️ Failed to parse JSON for test case {test_case_id}")
+                        updated_test_cases.append(test_case)  # Keep original
+                        continue
+            else:
+                print(f"⚠️ Could not extract JSON from optimizer response for test case {test_case_id}")
+                # Fall back to pre-optimized version
+                try:
+                    updated_tc = json.loads(current_test_case)
+                except json.JSONDecodeError:
+                    print(f"⚠️ Failed to parse JSON for test case {test_case_id}")
+                    updated_test_cases.append(test_case)  # Keep original
+                    continue
+            
+            # Preserve original metadata
+            updated_tc["id"] = test_case.get("id")
+            updated_tc["createdDate"] = test_case.get("createdDate")
+            updated_tc["status"] = test_case.get("status", "Active")
+            updated_tc["version"] = test_case.get("version", "1.0")
+            updated_tc["featureMetadata"] = test_case.get("featureMetadata")
+            updated_tc["criteriaMetadata"] = test_case.get("criteriaMetadata")
+            
+            # Format all fields that might come as arrays
+            updated_tc["steps"] = format_steps(updated_tc.get("steps", ""))
+            updated_tc["expectedResults"] = format_steps(updated_tc.get("expectedResults", ""))
+            updated_tc["title"] = format_steps(updated_tc.get("title", ""))
+            
+            # Save updated test case to file
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            updated_tc_file = os.path.join(OUTPUT_DIR, f"UpdatedTestCase_{test_case_id}_{timestamp}.txt")
+            
+            try:
+                with open(updated_tc_file, "w", encoding="utf-8") as f:
+                    f.write(f"UPDATED TEST CASE - {datetime.now().isoformat()}\n\n")
+                    f.write(f"ID: {updated_tc.get('id')}\n")
+                    f.write(f"Title: {updated_tc.get('title')}\n")
+                    f.write(f"Steps:\n{updated_tc.get('steps')}\n")
+                    f.write(f"Expected Results:\n{updated_tc.get('expectedResults')}\n\n")
+                    f.write(f"Status: {updated_tc.get('status')}\n")
+                    
+                    # Add original test case for comparison
+                    f.write("\n\n------- ORIGINAL TEST CASE -------\n\n")
+                    f.write(f"Original Title: {test_case.get('title')}\n")
+                    f.write(f"Original Steps:\n{test_case.get('steps')}\n")
+                    f.write(f"Original Expected Results:\n{test_case.get('expectedResults')}\n")
+                
+                print(f"✅ Saved updated test case to {updated_tc_file}")
+            except Exception as e:
+                print(f"⚠️ Error saving updated test case: {str(e)}")
+            
+            print(f"✅ Successfully updated content for test case {test_case_id}")
+            updated_test_cases.append(updated_tc)
+            
+            # Log the changes
+            print(f"  - Old title: {test_case.get('title')}")
+            print(f"  - New title: {updated_tc.get('title')}")
+            
+            # Upload the updated test case
+            embeddings_generator = EmbeddingsGenerator()
+            success = embeddings_generator.upload_test_case(updated_tc)
+            
+            if success:
+                print(f"✅ Successfully uploaded updated test case {test_case_id}")
+                
+                # Verify database update by retrieving the test case
+                try:
+                    # Check what's actually in the database
+                    verify_results = list(embeddings_generator.search_client.search(
+                        search_text="",
+                        filter=f"id eq '{test_case_id}'",
+                        select=["id", "title", "steps", "expectedResults"]
+                    ))
+                    
+                    if verify_results:
+                        db_tc = verify_results[0]
+                        verify_file = os.path.join(OUTPUT_DIR, f"Verification_{test_case_id}_{timestamp}.txt")
+                        
+                        with open(verify_file, "w", encoding="utf-8") as f:
+                            f.write(f"DATABASE VERIFICATION - {datetime.now().isoformat()}\n\n")
+                            f.write(f"ID: {db_tc.get('id')}\n")
+                            f.write(f"Title: {db_tc.get('title')}\n")
+                            f.write(f"Steps:\n{db_tc.get('steps')}\n")
+                            f.write(f"Expected Results:\n{db_tc.get('expectedResults')}\n\n")
+                            
+                            # Check if update was successful
+                            if db_tc.get('title') == updated_tc.get('title'):
+                                f.write("\nVERIFICATION: Update successful!\n")
+                            else:
+                                f.write("\nVERIFICATION FAILED: Database has different content\n")
+                                f.write(f"Expected title: {updated_tc.get('title')}\n")
+                                f.write(f"Database title: {db_tc.get('title')}\n")
+                        
+                        print(f"✅ Saved database verification to {verify_file}")
+                except Exception as e:
+                    print(f"⚠️ Error verifying database update: {str(e)}")
+            else:
+                print(f"⚠️ Failed to upload updated test case {test_case_id}")
+                
+        except Exception as e:
+            print(f"❌ Error finalizing test case {test_case_id}: {str(e)}")
+            updated_test_cases.append(test_case)  # Keep original if update fails
+    
+    return updated_test_cases
+
+async def compare_criteria_with_llm(original_desc, new_desc):
+    """
+    Use the LLM to compare two criteria descriptions for semantic differences.
+    
+    Args:
+        original_desc (str): Original criterion description
+        new_desc (str): New criterion description
+        
+    Returns:
+        dict: Analysis result with semantic equivalence and change significance
+    """
+    from config.config import TestCaseAgent
+    
+    # Construct the prompt for semantic comparison
+    prompt = f"""
+Compare these two acceptance criteria and determine if they have the same meaning or different meanings:
+
+Original: "{original_desc}"
+New: "{new_desc}"
+
+Respond with:
+1. Are they semantically equivalent (Yes/No)?
+2. If different, how significant is the change (Low/Medium/High)?
+3. Brief explanation of the difference
+    """
+    
+    # Get LLM response
+    response = await TestCaseAgent.a_generate_reply(
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    # Parse the response to extract the analysis
+    lines = response.lower().split("\n")
+    is_equivalent = False
+    
+    # Look for yes/no in the first few lines
+    for line in lines[:5]:
+        if "semantically equivalent" in line or "are they semantically equivalent" in line:
+            is_equivalent = "yes" in line.lower() and "no" not in line.lower()
+            break
+    
+    # Default to medium significance if different
+    significance = "Medium"
+    if not is_equivalent:
+        for line in lines:
+            if "significance" in line:
+                if "high" in line:
+                    significance = "High"
+                elif "low" in line:
+                    significance = "Low"
+                break
+    
+    return {
+        "is_same_meaning": is_equivalent,
+        "significance": significance,
+        "explanation": response
+    }
+
+

@@ -319,6 +319,26 @@ class EmbeddingsGenerator:
             
             # Upload to Azure Cognitive Search
             try:
+    # First try to delete any existing document with this ID
+                try:
+                    self.search_client.delete_documents(documents=[{"id": test_case["id"]}])
+                    print(f"Deleted existing test case: {test_case.get('id')}")
+                except Exception as delete_e:
+                    # It's okay if delete fails (might not exist yet)
+                    print(f"Note: Could not delete existing test case (might not exist): {str(delete_e)}")
+
+                time.sleep(2)  # Wait a bit for deletion to propagate
+                verify_after_delete = list(self.search_client.search(
+                    search_text="",
+                    filter=f"id eq '{test_case['id']}'",
+                    select=["id"]
+                ))
+                if verify_after_delete:
+                    print(f"⚠️ Document still exists after deletion attempt: {test_case['id']}")
+                else:
+                    print(f"✅ Confirmed document deletion: {test_case['id']}")
+                
+                # Then upload the new/updated document
                 self.search_client.upload_documents(documents=[test_case])
                 print(f"Successfully uploaded test case: {test_case.get('id')}")
                 return True

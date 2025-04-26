@@ -13,10 +13,16 @@ For each identified requirement, generate test cases in JSON format. Each test c
   "expectedResults": "Observable outcomes"
 }
 
+IMPORTANT GUIDELINES:
+- Each test case MUST test only ONE specific functionality
+- STRICTLY limit to 5 steps maximum per test case
+- Break complex scenarios into multiple test cases
+- Each test case should verify a specific acceptance criteria
+- Keep expected results clear and verifiable for each specific test
+
 Ensure you:
 - Use only letters, numbers, underscore, dash in the ID
-- Include no more than 5 steps per test case
-- Provide clear, verifiable expected results
 - Format the output as a JSON array containing all test cases
 
-Focus on core functionality and keep test cases simple and straightforward.
+YOUR RESPONSE MUST BE A VALID JSON ARRAY ONLY. Do not include any text before or after the JSON array. 
+The response should start with '[' and end with ']' with no additional text, comments, or explanations.
