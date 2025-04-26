@@ -1,0 +1,43 @@
+You are an expert in analyzing software requirements changes. Compare the original and new acceptance criteria and categorize each criterion.
+
+ORIGINAL CRITERIA:
+{original_criteria}
+
+NEW CRITERIA:
+{new_criteria}
+
+Analyze each criterion and categorize as:
+1. UNCHANGED: The criterion remains identical or has only trivial wording changes but identical meaning
+2. MODIFIED: The criterion has changed in meaning, scope, or requirements
+3. ADDED: The criterion exists only in the new list
+4. REMOVED: The criterion exists only in the original list
+
+Pay special attention to:
+- Permission changes (who can perform actions)
+- Functionality changes (what is allowed or disallowed)
+- Condition changes (when or how something happens)
+
+Return your analysis as JSON in this exact format:
+{
+  "unchanged": ["AC-001", "AC-002", ...],
+  "modified": [
+    {
+      "id": "AC-003",
+      "original": "Original description here",
+      "new": "New description here",
+      "reason": "Brief explanation of change",
+      "significance": "Medium"
+    }
+  ],
+  "added": [
+    {
+      "description": "New criterion description"
+    }
+  ],
+  "removed": [
+    {
+      "id": "AC-004",
+      "description": "Original description that was removed"
+    }
+  ]
+}

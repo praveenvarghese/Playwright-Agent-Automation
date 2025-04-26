@@ -21,8 +21,8 @@ def print_error(message): print(f"❌ {message}")
 
 async def analyze_criteria_changes(original_criteria, new_criteria_list):
     """
-    Analyze changes between original and new acceptance criteria.
-    Enhanced to use LLM for semantic understanding of requirement changes.
+    Analyze changes between original and new acceptance criteria using LLM.
+    Uses a prompt file to maintain consistent pattern.
     
     Args:
         original_criteria (list): List of original criteria objects with id and description
@@ -43,110 +43,97 @@ async def analyze_criteria_changes(original_criteria, new_criteria_list):
     print(f"🔹 Original criteria count: {len(original_criteria)}")
     print(f"🔹 New criteria count: {len(new_criteria_list)}")
     
-    # Separate active and deprecated criteria for better processing
+    # Separate active and deprecated criteria
     active_criteria = [c for c in original_criteria if c.get("status", "Active") == "Active"]
     deprecated_criteria = [c for c in original_criteria if c.get("status", "") == "Deprecated"]
     
     print(f"🔹 Active criteria: {len(active_criteria)}")
     print(f"🔹 Deprecated criteria: {len(deprecated_criteria)}")
     
-    # Convert lists to lowercase for easier comparison
-    active_desc_list = [c.get("description", "").lower().strip() for c in active_criteria]
-    deprecated_desc_list = [c.get("description", "").lower().strip() for c in deprecated_criteria]
-    new_desc_list = [desc.lower().strip() for desc in new_criteria_list]
+    # Load the criteria analysis prompt template
+    PROMPTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../..", "prompts"))
+    prompt_file = os.path.join(PROMPTS_DIR, "criteria_analysis_prompt.txt")
     
-    # Step 1: Find unchanged active criteria
-    matched_active_indices = set()
-    matched_new_indices = set()
+    with open(prompt_file, "r", encoding="utf-8") as f:
+        prompt_template = f.read()
     
-    for i, original in enumerate(active_criteria):
-        original_desc_lower = active_desc_list[i]
+    # Format the criteria for the LLM
+    original_formatted = []
+    for i, criteria in enumerate(active_criteria):
+        original_formatted.append(f"{i+1}. ID: {criteria.get('id')} - {criteria.get('description', '')}")
+    
+    new_formatted = []
+    for i, description in enumerate(new_criteria_list):
+        new_formatted.append(f"{i+1}. {description}")
+    
+    # Fill in the prompt template
+    prompt = prompt_template.replace("{original_criteria}", "\n".join(original_formatted))
+    prompt = prompt.replace("{new_criteria}", "\n".join(new_formatted))
+    
+    # Get response from LLM
+    from config.config import TestCaseAgent
+    
+    response = await TestCaseAgent.a_generate_reply(
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    # Save the response for debugging
+    log_file = os.path.join(PROMPTS_DIR, "../logs", f"criteria_analysis_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt")
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write(response)
+    
+    # Parse the JSON response
+    import json
+    import re
+    
+    # Extract JSON from response
+    json_match = re.search(r'({[\s\S]*})', response)
+    json_str = json_match.group(1)
+    analysis_json = json.loads(json_str)
+    
+    # Process the LLM analysis
+    # 1. Process unchanged criteria
+    unchanged_ids = analysis_json.get("unchanged", [])
+    for criteria in active_criteria:
+        if criteria.get("id") in unchanged_ids:
+            result["unchanged"].append(criteria)
+    
+    # 2. Process modified criteria
+    for mod in analysis_json.get("modified", []):
+        criteria_id = mod.get("id")
+        new_desc = mod.get("new")
         
-        for j, new_desc_lower in enumerate(new_desc_list):
-            if original_desc_lower == new_desc_lower and j not in matched_new_indices:
-                result["unchanged"].append(original)
-                matched_active_indices.add(i)
-                matched_new_indices.add(j)
+        # Find the original criteria
+        for criteria in active_criteria:
+            if criteria.get("id") == criteria_id:
+                # Find the matching new description
+                for desc in new_criteria_list:
+                    if desc.strip() == new_desc.strip():
+                        result["modified"].append((criteria, desc))
+                        print(f"🔹 LLM detected modified criteria: {criteria_id}")
+                        print(f"   - Significance: {mod.get('significance', 'Medium')}")
+                        break
                 break
     
-    # Step 2: Check if any new criteria match previously deprecated criteria
-    matched_deprecated_indices = set()
-    
-    for i, deprecated in enumerate(deprecated_criteria):
-        deprecated_desc_lower = deprecated_desc_list[i]
-        
-        for j, new_desc_lower in enumerate(new_desc_list):
-            if j in matched_new_indices:
-                continue
-                
-            # Check for exact match or high similarity
-            if deprecated_desc_lower == new_desc_lower or calculate_text_similarity(deprecated_desc_lower, new_desc_lower) > 0.9:
-                # This is a previously deprecated criteria that's being added back
-                result["reactivated"].append((deprecated, new_criteria_list[j]))
-                matched_deprecated_indices.add(i)
-                matched_new_indices.add(j)
-                print(f"🔹 Found reactivated criteria: {deprecated.get('id')} - {deprecated_desc_lower[:50]}...")
+    # 3. Process added criteria
+    for add in analysis_json.get("added", []):
+        new_desc = add.get("description")
+        # Find the matching description in the new list
+        for desc in new_criteria_list:
+            if desc.strip() == new_desc.strip():
+                result["added"].append(desc)
                 break
     
-    # Step 3: Use LLM to compare remaining criteria for semantic differences
-    for i, original in enumerate(active_criteria):
-        if i in matched_active_indices:
-            continue
-            
-        original_desc = original.get("description", "")
+    # 4. Process removed criteria
+    for remove in analysis_json.get("removed", []):
+        criteria_id = remove.get("id")
         
-        best_match_idx = -1
-        best_match_score = 0.7  # Minimum similarity threshold
-        
-        for j, new_desc_lower in enumerate(new_desc_list):
-            if j in matched_new_indices:
-                continue
-                
-            # First use simple similarity to filter obvious non-matches
-            score = calculate_text_similarity(active_desc_list[i], new_desc_lower)
-            
-            if score > 0.5:  # If there's basic similarity, check semantic meaning with LLM
-                # Use LLM to compare the criteria semantically
-                comparison = await compare_criteria_with_llm(original_desc, new_criteria_list[j])
-                
-                if comparison["is_same_meaning"]:
-                    # They have the same meaning according to LLM, mark as unchanged
-                    result["unchanged"].append(original)
-                    matched_active_indices.add(i)
-                    matched_new_indices.add(j)
-                    print(f"🔹 LLM found semantically equivalent criteria: {original.get('id')}")
-                    break
-                else:
-                    # They are different but related, mark as modified
-                    result["modified"].append((original, new_criteria_list[j]))
-                    matched_active_indices.add(i)
-                    matched_new_indices.add(j)
-                    print(f"🔹 LLM detected modified criteria: {original.get('id')}")
-                    print(f"   - Significance: {comparison['significance']}")
-                    break
-            
-            # If we haven't found a semantic match but there's high lexical similarity
-            elif score > best_match_score:
-                best_match_score = score
-                best_match_idx = j
-        
-        # If no semantic match found but we have a good lexical match
-        if i not in matched_active_indices and best_match_idx >= 0:
-            result["modified"].append((original, new_criteria_list[best_match_idx]))
-            matched_active_indices.add(i)
-            matched_new_indices.add(best_match_idx)
-    
-    # Step 4: Explicitly check for removed criteria (only from active criteria)
-    for i, original in enumerate(active_criteria):
-        if i not in matched_active_indices:
-            result["removed"].append(original)
-            print(f"🔹 Detected removed criteria: {original.get('description', '')[:50]}...")
-    
-    # Step 5: Add remaining new criteria as added
-    for j, new_desc in enumerate(new_criteria_list):
-        if j not in matched_new_indices:
-            result["added"].append(new_desc)
-            print(f"🔹 Detected added criteria: {new_desc[:50]}...")
+        # Find the original criteria
+        for criteria in active_criteria:
+            if criteria.get("id") == criteria_id:
+                result["removed"].append(criteria)
+                break
     
     # Print summary
     print(f"🔹 Changes detected: {len(result['unchanged'])} unchanged, {len(result['modified'])} modified, " +
