@@ -9,6 +9,7 @@ from src.vector_search.embeddings import EmbeddingsGenerator
 from src.vector_search.feature_processor import FeatureProcessor
 from src.utils.test_case_analyzer import analyze_test_cases_with_embeddings
 from src.utils.json_parser import format_steps
+import time
    
 
 # Helper functions for message formatting (reusing from test_case_workflow.py)
@@ -2073,6 +2074,8 @@ async def update_test_case_content(test_cases_to_update, changed_criteria):
             
             if success:
                 print(f"✅ Successfully uploaded updated test case {test_case_id}")
+
+                time.sleep(2)
                 
                 # Verify database update by retrieving the test case
                 try:
