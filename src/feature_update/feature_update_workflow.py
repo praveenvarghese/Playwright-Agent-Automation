@@ -2161,5 +2161,410 @@ Respond with:
         "significance": significance,
         "explanation": response
     }
+ 
+async def read_tagged_feature_requirement(file_path):
+    """
+    Read and parse a feature requirement file with explicit change tags.
+    
+    Args:
+        file_path (str): Path to the feature requirement file
+        
+    Returns:
+        dict: Parsed feature data with tagged changes
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Initialize feature dict
+        feature = {}
+        
+        # Parse the TYPE
+        type_match = re.search(r'TYPE:\s*(\w+)', content)
+        if type_match:
+            feature['type'] = type_match.group(1).strip()
+        
+        # Parse the TITLE
+        title_match = re.search(r'TITLE:\s*(.+?)(?=\n\w+:|$)', content, re.DOTALL)
+        if title_match:
+            feature['title'] = title_match.group(1).strip()
+        
+        # Parse the DESCRIPTION
+        desc_match = re.search(r'DESCRIPTION:\s*(.+?)(?=\n\w+:|$)', content, re.DOTALL)
+        if desc_match:
+            feature['description'] = desc_match.group(1).strip()
+        
+        # Parse the ACCEPTANCE_CRITERIA with tags
+        criteria_match = re.search(r'ACCEPTANCE_CRITERIA:\s*(.+?)(?=\n\w+:|$)', content, re.DOTALL)
+        if criteria_match:
+            criteria_text = criteria_match.group(1).strip()
+            
+            # Initialize categorized criteria lists
+            feature['criteria_changes'] = {
+                'keep': [],
+                'update': [],
+                'new': [],
+                'remove': []
+            }
+            
+            # Split by bullet points or lines
+            criteria_lines = []
+            for line in criteria_text.split('\n'):
+                line = line.strip()
+                if line.startswith('•') or line.startswith('-') or line.startswith('['):
+                    criteria_lines.append(line)
+                elif line.startswith('Previous:') and criteria_lines:
+                    # Attach "Previous" line to the last update item
+                    criteria_lines[-1] += "\n  " + line
+            
+            # Process each criterion line
+            for line in criteria_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Remove bullet points
+                clean_line = re.sub(r'^\s*[•-]\s*', '', line)
+                
+                # Check for tagged lines
+                if re.search(r'^\s*\[KEEP\]', clean_line, re.IGNORECASE):
+                    # Extract the criterion text
+                    criterion = re.sub(r'^\s*\[KEEP\]\s*', '', clean_line).strip()
+                    feature['criteria_changes']['keep'].append(criterion)
+                
+                elif re.search(r'^\s*\[UPDATE\]', clean_line, re.IGNORECASE):
+                    # Split the line if it contains "Previous:"
+                    parts = clean_line.split("\n")
+                    criterion = re.sub(r'^\s*\[UPDATE\]\s*', '', parts[0]).strip()
+                    
+                    # Look for Previous: line
+                    previous = ""
+                    if len(parts) > 1 and "Previous:" in parts[1]:
+                        previous = re.sub(r'^\s*Previous:\s*', '', parts[1]).strip()
+                    
+                    feature['criteria_changes']['update'].append({
+                        'new': criterion,
+                        'previous': previous
+                    })
+                
+                elif re.search(r'^\s*\[NEW\]', clean_line, re.IGNORECASE):
+                    # Extract the new criterion text
+                    criterion = re.sub(r'^\s*\[NEW\]\s*', '', clean_line).strip()
+                    feature['criteria_changes']['new'].append(criterion)
+                
+                elif re.search(r'^\s*\[REMOVE\]', clean_line, re.IGNORECASE):
+                    # Extract the criterion text to be removed
+                    criterion = re.sub(r'^\s*\[REMOVE\]\s*', '', clean_line).strip()
+                    feature['criteria_changes']['remove'].append(criterion)
+                
+                # If no tag, treat as KEEP for backward compatibility
+                else:
+                    feature['criteria_changes']['keep'].append(clean_line)
+        
+        # Add the raw acceptance criteria list for compatibility
+        feature['acceptance_criteria'] = []
+        for criterion in feature['criteria_changes']['keep']:
+            feature['acceptance_criteria'].append(criterion)
+        for update in feature['criteria_changes']['update']:
+            feature['acceptance_criteria'].append(update['new'])
+        for criterion in feature['criteria_changes']['new']:
+            feature['acceptance_criteria'].append(criterion)
+        
+        # Parse the RELATED_FEATURES
+        related_match = re.search(r'RELATED_FEATURES:\s*(.+?)(?=\n\w+:|$)', content, re.DOTALL)
+        if related_match:
+            related_text = related_match.group(1).strip()
+            if related_text:
+                feature['related_features'] = [id.strip() for id in related_text.split(',')]
+            else:
+                feature['related_features'] = []
+        else:
+            feature['related_features'] = []
+        feature_processor = FeatureProcessor()
+        processed_feature = feature_processor.process_feature(feature)
+        return processed_feature
+    
+    except Exception as e:
+        print(f"❌ Error reading tagged feature requirement: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
+async def tagged_update_feature_workflow(feature_data):
+    """
+    Process feature update based on tagged criteria changes.
+    
+    Args:
+        feature_data (dict): The processed feature data with tagged changes
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not feature_data or not feature_data.get('id'):
+        print(f"❌ Invalid feature data for tagged update")
+        return False
+    
+    print(f"🔹 Starting tagged update workflow for feature: {feature_data['id']}")
+    
+    # Initialize components
+    feature_processor = FeatureProcessor()
+    vector_system = VectorRetrievalSystem()
+    
+    try:
+        # Step 1: Get original feature data
+        original_feature = await get_original_feature(feature_data['id'])
+        if not original_feature:
+            print(f"⚠️ Couldn't find original feature with ID {feature_data['id']}. Will proceed as new feature.")
+            return False
+        
+        # Step 2: Process tagged criteria changes
+        original_criteria = original_feature.get('acceptanceCriteria', [])
+        
+        # Initialize result dictionary with structure similar to analyze_criteria_changes
+        criteria_changes = {
+            "unchanged": [],
+            "modified": [],
+            "added": [],
+            "removed": [],
+            "reactivated": []
+        }
+        
+        # Process KEEP criteria
+        for keep_text in feature_data['criteria_changes']['keep']:
+            matched = await match_criteria_with_llm(keep_text, original_criteria)
+            if matched:
+                criteria_changes["unchanged"].append(matched)
+            else:
+                # If no match found, treat as new
+                print(f"⚠️ Could not find match for KEEP criterion, treating as new: {keep_text[:50]}...")
+                criteria_changes["added"].append(keep_text)
+        
+        # Process UPDATE criteria
+        for update_item in feature_data['criteria_changes']['update']:
+            new_text = update_item['new']
+            previous_text = update_item['previous']
+            
+            # Try to match using previous text if available
+            if previous_text:
+                matched = await match_criteria_with_llm(previous_text, original_criteria)
+            else:
+                # Fall back to matching with new text if previous not provided
+                matched = await match_criteria_with_llm(new_text, original_criteria)
+            
+            if matched:
+                criteria_changes["modified"].append((matched, new_text))
+            else:
+                # If no match found, treat as new
+                print(f"⚠️ Could not find match for UPDATE criterion, treating as new: {new_text[:50]}...")
+                criteria_changes["added"].append(new_text)
+        
+        # Process NEW criteria
+        for new_text in feature_data['criteria_changes']['new']:
+            # Check if this might be a reactivation of previously deprecated criteria
+            deprecated_criteria = [c for c in original_criteria if c.get("status", "") == "Deprecated"]
+            matched = await match_criteria_with_llm(new_text, deprecated_criteria)
+            
+            if matched:
+                criteria_changes["reactivated"].append((matched, new_text))
+                print(f"🔹 Detected reactivation of deprecated criterion: {matched.get('id')}")
+            else:
+                criteria_changes["added"].append(new_text)
+        
+        # Process REMOVE criteria
+        for remove_text in feature_data['criteria_changes']['remove']:
+            matched = await match_criteria_with_llm(remove_text, original_criteria)
+            if matched:
+                criteria_changes["removed"].append(matched)
+            else:
+                print(f"⚠️ Could not find match for REMOVE criterion: {remove_text[:50]}...")
+        
+        # Log the analysis results
+        print(f"🔹 Tagged criteria analysis complete:")
+        print(f"🔹  - Unchanged: {len(criteria_changes['unchanged'])}")
+        print(f"🔹  - Modified: {len(criteria_changes['modified'])}")
+        print(f"🔹  - Added: {len(criteria_changes['added'])}")
+        print(f"🔹  - Removed: {len(criteria_changes['removed'])}")
+        print(f"🔹  - Reactivated: {len(criteria_changes.get('reactivated', []))}")
+        
+        # Continue with your existing workflow using the criteria_changes dict
+        # These functions can remain unchanged since we're creating a compatible criteria_changes structure
+        
+        # Get existing test cases
+        existing_test_cases = await vector_system.retrieve_test_cases_by_feature_id(feature_data['id'])
+        print(f"🔹 Found {len(existing_test_cases)} existing test cases for this feature")
+        
+        await fix_null_status_in_test_cases(feature_data['id'])
+        
+        # Analyze test cases in relation to criteria changes
+        test_case_decision = await analyze_test_cases_with_embeddings(existing_test_cases, criteria_changes)
+        
+        # Create updated acceptance criteria objects
+        updated_criteria_objects = create_updated_criteria_objects(
+            original_criteria=original_feature.get('acceptanceCriteria', []),
+            criteria_changes=criteria_changes
+        )
+        
+        # Update the feature with new criteria
+        feature_update_success = feature_processor.update_feature_with_criteria(
+            feature_id=feature_data['id'],
+            feature_data=feature_data,
+            updated_criteria=updated_criteria_objects,
+            preserve_test_cases=True
+        )
 
+        if not feature_update_success:
+            print(f"⚠️ Failed to update feature with new criteria")
+            return False
+
+        # Check for criteria that changed from Deprecated to Active
+        if criteria_changes['reactivated']:
+            reactivated_criteria_ids = [reactivated[0].get('id') for reactivated in criteria_changes['reactivated']]
+            await reactivate_criteria_in_test_cases(
+                feature_id=feature_data['id'],
+                reactivated_criteria_ids=reactivated_criteria_ids
+            )
+
+        # Mark criteria as inactive in test cases that will be kept
+        removed_criteria_ids = [c.get("id") for c in criteria_changes["removed"]]
+        if removed_criteria_ids:
+            await mark_deprecated_criteria_in_test_cases(
+                feature_id=feature_data['id'],
+                removed_criteria_ids=removed_criteria_ids,
+                keep_test_cases=test_case_decision['keep_unchanged'] + test_case_decision['keep_with_updates']
+            )
+        
+        # Mark test cases that need regeneration as inactive
+        if test_case_decision['regenerate']:
+            regenerate_ids = [tc.get('id') for tc in test_case_decision['regenerate']]
+            await mark_test_cases_inactive(
+                feature_id=feature_data['id'],
+                test_case_ids=regenerate_ids,
+                reason="Criteria removed or significantly changed"
+            )
+        
+        # Update content for test cases that need updates
+        if test_case_decision['keep_with_updates']:
+            # Create a list of criteria changes with old and new versions
+            modified_criteria_pairs = []
+            for original, new_description in criteria_changes['modified']:
+                modified_criteria_pairs.append((original, new_description))
+            
+            # Update test case content
+            updated_test_cases = await update_test_case_content(
+                test_case_decision['keep_with_updates'], 
+                modified_criteria_pairs
+            )
+        
+        # Generate new test cases if needed
+        test_cases_to_regenerate = len(test_case_decision['regenerate']) > 0 or len(criteria_changes['added']) > 0
+        
+        if test_cases_to_regenerate:
+            print(f"🔹 Generating new test cases for modified/added criteria...")
+            
+            # Prepare context using existing test cases
+            context_test_cases = test_case_decision['keep_unchanged'] + test_case_decision['keep_with_updates']
+            
+            # Generate requirements-specific text for new test cases
+            requirement_text = await generate_requirement_text(
+                feature_data, criteria_changes['added'], criteria_changes['modified']
+            )
+            
+            # Generate new test cases
+            new_test_cases_content = await generate_selective_test_cases(
+                requirement_text, context_test_cases, criteria_changes
+            )
+            
+            if new_test_cases_content:
+                # Process and store the new test cases with feature relation
+                process_success = await process_and_store_selective_test_cases(
+                    new_test_cases_content, feature_data, updated_criteria_objects
+                )
+                if not process_success:
+                    print(f"⚠️ Some new test cases could not be processed properly")
+            else:
+                print(f"⚠️ No new test cases were generated")
+        
+        # Final metadata verification
+        print(f"🔹 Performing final metadata verification...")
+        final_fixes = await fix_test_case_metadata_issues(feature_data['id'], fix_null_status=True)
+        if final_fixes > 0:
+            print(f"✅ Fixed metadata issues in {final_fixes} test cases during final verification")
+            
+        print(f"✅ Tagged feature update workflow completed successfully for {feature_data['id']}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error in tagged update workflow: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+    
+async def match_criteria_with_llm(criterion_text, existing_criteria):
+    """
+    Use LLM to match criterion text with existing criteria based on semantic understanding.
+    
+    Args:
+        criterion_text (str): The criterion text to match
+        existing_criteria (list): List of existing criteria objects 
+        
+    Returns:
+        dict: Matched criterion or None if no match
+    """
+    from config.config import TestCaseAgent
+    
+    # If no existing criteria, return None
+    if not existing_criteria:
+        return None
+    
+    # Read the matching prompt template
+    prompt_file = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")), 
+                             "prompts", "criteria_matching_prompt.txt")
+    
+    try:
+        with open(prompt_file, "r", encoding="utf-8") as f:
+            prompt_template = f.read()
+    except FileNotFoundError:
+        print(f"❌ Criteria matching prompt file not found at {prompt_file}")
+        return None
+    
+    # Format existing criteria for the prompt
+    existing_criteria_text = ""
+    for criterion in existing_criteria:
+        criteria_id = criterion.get("id", "")
+        description = criterion.get("description", "")
+        if criteria_id and description:
+            existing_criteria_text += f"{criteria_id}: {description}\n"
+    
+    # Fill in the prompt template
+    prompt = prompt_template.replace("{criterion_text}", criterion_text)
+    prompt = prompt.replace("{existing_criteria}", existing_criteria_text)
+    
+    # Get LLM response
+    try:
+        response = await TestCaseAgent.a_generate_reply(
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        # Parse response to get matched ID
+        response = response.strip()
+        
+        # If it responded with an ID, find the matching criterion
+        if "NO_MATCH" not in response.upper():
+            # Extract ID from response (might include quotes or other text)
+            match = re.search(r'([A-Z]+-\d+)', response)
+            if match:
+                matched_id = match.group(1)
+                
+                # Find the criterion with this ID
+                for criterion in existing_criteria:
+                    if criterion.get("id") == matched_id:
+                        print(f"✅ LLM matched criterion: {matched_id}")
+                        return criterion
+        
+        print(f"⚠️ No semantic match found for: {criterion_text[:50]}...")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error using LLM for criteria matching: {str(e)}")
+        return None
 

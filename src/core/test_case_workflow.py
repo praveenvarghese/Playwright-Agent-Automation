@@ -152,7 +152,6 @@ Only include the JSON response, nothing else."""
         print_error(f"Error reading criteria mapping prompt: {str(e)}")
         return None
 
-
 async def map_test_cases_to_criteria_with_ai(parsed_test_cases, acceptance_criteria):
     """
     Use AI to intelligently map test cases to acceptance criteria.

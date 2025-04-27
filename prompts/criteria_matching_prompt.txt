@@ -1,0 +1,16 @@
+I need to determine if a criterion from a requirements update matches any existing criteria.
+
+CRITERION TO MATCH:
+{criterion_text}
+
+EXISTING CRITERIA:
+{existing_criteria}
+
+Your task:
+1. Analyze if the criterion semantically matches any existing criterion
+2. Consider both exact matches and criteria with the same meaning but different wording
+3. Respond with ONLY the ID of the matched criterion, or "NO_MATCH" if there's no match
+
+Example responses:
+"AC-001" (if it matches criterion AC-001)
+"NO_MATCH" (if it doesn't match any existing criterion)
