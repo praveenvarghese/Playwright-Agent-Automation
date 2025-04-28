@@ -3,12 +3,16 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import re
-from src.test_cases.generator import generate_test_cases
-from src.vector_search.retrieval import VectorRetrievalSystem
-from src.vector_search.embeddings import EmbeddingsGenerator
-from src.vector_search.feature_processor import FeatureProcessor
-from src.utils.test_case_analyzer import analyze_test_cases_with_embeddings
-from src.utils.json_parser import format_steps
+from test_case_creation.test_case_handling.generator import generate_test_cases
+from test_case_creation.data_services.vector_search import VectorRetrievalSystem
+from test_case_creation.data_services.embeddings import EmbeddingsGenerator
+from test_case_creation.feature_management.feature_processor import FeatureProcessor
+from test_case_creation.test_case_handling.test_case_analyzer import analyze_test_cases_with_embeddings
+from test_case_creation.helpers.json_parser import format_steps
+from test_case_creation.helpers.common_utils import print_progress, print_success, print_warning, print_error
+from test_case_creation.data_services.embeddings import EmbeddingsGenerator
+from test_case_creation.config.config import TestCaseAgent, TestCaseCritic, TestCaseOptimizer
+from test_case_creation.test_case_handling.test_case_workflow import process_and_store_test_cases
 import time
    
 
@@ -834,7 +838,6 @@ async def generate_selective_test_cases(requirement_text, context_test_cases, cr
     Returns:
         str: Generated test cases content
     """
-    from src.test_cases.generator import generate_test_cases
     
     # Prepare context with existing test cases
     context = ""
@@ -878,7 +881,7 @@ async def process_and_store_selective_test_cases(test_cases_content, feature_dat
     Returns:
         bool: True if successful, False otherwise
     """
-    from src.core.test_case_workflow import process_and_store_test_cases
+    
     
     # Process the test cases using the existing function
     success = await process_and_store_test_cases(test_cases_content, feature_data)
@@ -1625,10 +1628,9 @@ async def update_test_case_content(test_cases_to_update, changed_criteria):
     Returns:
         list: Updated test cases with modified content
     """
-    from config.config import TestCaseAgent, TestCaseCritic, TestCaseOptimizer
-    from src.utils.json_parser import format_steps
+    
     PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-    PROMPTS_DIR = os.path.join(PROJECT_ROOT, "prompts")
+    PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "../prompts")
     LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
 

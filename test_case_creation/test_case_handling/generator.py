@@ -1,12 +1,15 @@
 import asyncio
 import os
-from config.config import TestCaseAgent, TestCaseCritic, TestCaseOptimizer
+from test_case_creation.config.config import TestCaseAgent, TestCaseCritic, TestCaseOptimizer
+
+# Further down in the file, change:
+from test_case_creation.feature_management.feature_processor import FeatureProcessor
 
 # Define paths using project structure
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
-PROMPTS_DIR = os.path.join(PROJECT_ROOT, "prompts")
+PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "../prompts")
 
 # Make sure directories exist
 for directory in [LOGS_DIR, OUTPUT_DIR]:
@@ -55,7 +58,6 @@ async def generate_test_cases(similar_cases=None, max_iterations=2):
     
     # Parse acceptance criteria
     try:
-        from src.vector_search.feature_processor import FeatureProcessor
         feature_processor = FeatureProcessor()
         parsed_requirement = feature_processor.read_feature_requirement(FEATURE_REQUIREMENT_FILE)
         acceptance_criteria = parsed_requirement.get('acceptance_criteria', [])

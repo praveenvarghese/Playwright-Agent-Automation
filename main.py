@@ -1,9 +1,9 @@
 import asyncio
 import os
-from src.core.test_case_workflow import read_feature_requirement, read_requirement, find_similar_test_cases, create_test_cases, process_and_store_test_cases
-from src.core.test_case_workflow import print_success, print_error, print_progress, print_warning
-from src.utils.logging_filter import configure_clean_console
-from src.feature_update.feature_update_workflow import update_feature_workflow  # Import the new module
+from test_case_creation.test_case_handling.test_case_workflow import read_feature_requirement, read_requirement, find_similar_test_cases, create_test_cases, process_and_store_test_cases
+from test_case_creation.helpers.common_utils import print_success, print_error, print_progress, print_warning
+from test_case_creation.helpers.logging_utils import configure_clean_console
+from test_case_creation.feature_management.feature_updater import update_feature_workflow# Import the new module
 
 async def main():
     """Enhanced main workflow for test case generation and storage with update support."""

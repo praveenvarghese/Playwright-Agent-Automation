@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
-import uuid  # For generating unique IDs for acceptance criteria
+import uuid
+from test_case_creation.helpers.common_utils import print_progress, print_success, print_warning, print_error # For generating unique IDs for acceptance criteria
+from test_case_creation.data_services.embeddings import EmbeddingsGenerator
 
 # Load environment variables
 load_dotenv()
@@ -33,7 +35,7 @@ class FeatureProcessor:
         # Define paths
         self.PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
         self.REGISTRY_PATH = os.path.join(self.PROJECT_ROOT, "data", "feature_registry.json")
-        self.REQUIREMENTS_DIR = os.path.join(self.PROJECT_ROOT, "prompts")
+        self.REQUIREMENTS_DIR = os.path.join(os.path.dirname(__file__), "../prompts")
         
         # Ensure directories exist
         os.makedirs(os.path.dirname(self.REGISTRY_PATH), exist_ok=True)
@@ -161,7 +163,7 @@ class FeatureProcessor:
             
             # Now update the test cases to ensure bidirectional relationship
             if test_cases_to_add:
-                from src.vector_search.embeddings import EmbeddingsGenerator
+                
                 embeddings_generator = EmbeddingsGenerator()
                 updated_tc_count = 0
                 
@@ -498,7 +500,7 @@ class FeatureProcessor:
                     print(f"🔹 Attempting to recover test case IDs by searching test cases...")
                     
                     # Initialize embeddings generator to search for test cases
-                    from src.vector_search.embeddings import EmbeddingsGenerator
+                    
                     embeddings_generator = EmbeddingsGenerator()
                     
                     try:
@@ -600,7 +602,7 @@ class FeatureProcessor:
             print(f"⚠️ No test case IDs found directly in feature, attempting recovery...")
             
             # Second attempt: Look up test cases that reference this feature
-            from src.vector_search.embeddings import EmbeddingsGenerator
+            
             embeddings_generator = EmbeddingsGenerator()
             
             try:
@@ -702,7 +704,7 @@ class FeatureProcessor:
             print(f"🔹 Feature {feature_id} currently references {len(feature_test_case_ids)} test cases")
             
             # Step 2: Find all test cases that reference this feature
-            from src.vector_search.embeddings import EmbeddingsGenerator
+            
             embeddings_generator = EmbeddingsGenerator()
             
             try:

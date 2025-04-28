@@ -1,5 +1,5 @@
 import asyncio
-from src.vector_search.embeddings import EmbeddingsGenerator
+from test_case_creation.data_services.embeddings import EmbeddingsGenerator
 
 class VectorRetrievalSystem:
     def __init__(self):

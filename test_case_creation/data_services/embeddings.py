@@ -7,6 +7,7 @@ from azure.search.documents import SearchClient
 from azure.search.documents._generated.models import VectorQuery as GeneratedVectorQuery
 from azure.search.documents.models import VectorQuery
 from azure.core.credentials import AzureKeyCredential
+from test_case_creation.helpers.common_utils import print_progress, print_success, print_warning, print_error
 
 class EmbeddingsGenerator:
     def __init__(self):

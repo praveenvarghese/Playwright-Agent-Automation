@@ -2,18 +2,19 @@ import os
 from datetime import datetime
 
 # Import modules using the new structure
-from src.test_cases.generator import generate_test_cases
-from src.vector_search.retrieval import VectorRetrievalSystem
-from src.vector_search.embeddings import EmbeddingsGenerator
-from src.vector_search.feature_processor import FeatureProcessor
-from src.utils.json_parser import parse_test_cases_from_llm_output
-from src.utils.embeddings_mapper import map_test_cases_to_criteria_with_embeddings
+from test_case_creation.test_case_handling.generator import generate_test_cases
+from test_case_creation.data_services.vector_search import VectorRetrievalSystem
+from test_case_creation.data_services.embeddings import EmbeddingsGenerator
+from test_case_creation.feature_management.feature_processor import FeatureProcessor
+from test_case_creation.helpers.json_parser import parse_test_cases_from_llm_output
+from test_case_creation.data_services.criteria_mapper import map_test_cases_to_criteria_with_embeddings
+from test_case_creation.helpers.common_utils import print_progress, print_success, print_warning, print_error
 
 # Define constants for all path references
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
-PROMPTS_DIR = os.path.join(PROJECT_ROOT, "prompts")
+PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "../prompts")
 
 # Create necessary directories
 for directory in [LOGS_DIR, OUTPUT_DIR]:
@@ -158,7 +159,6 @@ async def process_and_store_test_cases(test_cases_content, feature_data=None):
     print_progress("Processing and uploading test cases...")
     
     # Parse test cases from LLM output using the improved JSON parser
-    from src.utils.json_parser import parse_test_cases_from_llm_output
     parsed_test_cases = parse_test_cases_from_llm_output(test_cases_content)
     
     print_progress(f"Found {len(parsed_test_cases)} test cases in the generated content")

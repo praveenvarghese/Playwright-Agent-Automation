@@ -2,7 +2,8 @@ import os
 import json
 from datetime import datetime
 import numpy as np
-from src.vector_search.embeddings import EmbeddingsGenerator
+from test_case_creation.data_services.embeddings import EmbeddingsGenerator
+from test_case_creation.helpers.common_utils import calculate_cosine_similarity
 
 async def map_test_cases_to_criteria_with_embeddings(parsed_test_cases, acceptance_criteria):
     """

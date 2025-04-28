@@ -1,6 +1,7 @@
 import numpy as np
 from datetime import datetime, timezone
-from src.vector_search.embeddings import EmbeddingsGenerator
+from test_case_creation.data_services.embeddings import EmbeddingsGenerator
+from test_case_creation.helpers.common_utils import calculate_cosine_similarity
 
 async def analyze_test_cases_with_embeddings(test_cases, criteria_changes):
     """
