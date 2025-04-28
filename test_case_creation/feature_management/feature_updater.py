@@ -776,29 +776,8 @@ async def generate_requirement_text(feature_data, added_criteria, modified_crite
     prompt_file = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")), 
                              "prompts", "generator_prompt.txt")
     
-    try:
-        with open(prompt_file, "r", encoding="utf-8") as f:
-            template = f.read()
-    except FileNotFoundError:
-        print_error(f"Generator prompt template not found at {prompt_file}")
-        # Create a minimal template
-        template = """As an expert test case designer, create simplified test cases for a web-based application with the following requirements:
-
-Requirement Specification
-Description
-{description}
-
-Acceptance Criteria
-{criteria}
-
-For each identified requirement, generate 2 simple test cases that include only:
-
-1. Test Case ID: TC-{prefix}-[Number]
-2. Test Case Title: Clear, action-oriented title
-3. Test Steps: Numbered, specific user actions (no more than 5 steps per test case)
-4. Expected Results: Observable outcomes
-
-Focus on the most basic, core functionality test cases. Do not include preconditions, test data, assertion points, or test categories. Keep the test cases simple and straightforward."""
+    with open(prompt_file, "r", encoding="utf-8") as f:
+        template = f.read()
     
     # Create a prefix for test case IDs based on feature title
     prefix = "ENV"  # Default
@@ -1640,34 +1619,23 @@ async def update_test_case_content(test_cases_to_update, changed_criteria):
     print(f"🔹 Updating content of {len(test_cases_to_update)} test cases...")
     updated_test_cases = []
     
-    # Load the update prompt
+    # Load the prompt files
     UPDATE_PROMPT_FILE = os.path.join(PROMPTS_DIR, "test_case_update_prompt.txt")
-    try:
-        with open(UPDATE_PROMPT_FILE, "r", encoding="utf-8") as f:
-            update_prompt_template = f.read()
-    except FileNotFoundError:
-        print(f"❌ Error: Update prompt file not found at {UPDATE_PROMPT_FILE}")
-        return test_cases_to_update  # Return original test cases if prompt file not found
-    
-    # Load the update critic prompt
     UPDATE_CRITIC_PROMPT_FILE = os.path.join(PROMPTS_DIR, "test_case_update_critic_prompt.txt")
-    try:
-        with open(UPDATE_CRITIC_PROMPT_FILE, "r", encoding="utf-8") as f:
-            update_critic_template = f.read()
-    except FileNotFoundError:
-        print(f"⚠️ Update critic prompt file not found at {UPDATE_CRITIC_PROMPT_FILE}")
-        # Use empty string if file not found - we'll handle this later
-        update_critic_template = ""
-
-    # Load the update optimizer prompt
     UPDATE_OPTIMIZER_PROMPT_FILE = os.path.join(PROMPTS_DIR, "test_case_update_optimizer_prompt.txt")
-    try:
-        with open(UPDATE_OPTIMIZER_PROMPT_FILE, "r", encoding="utf-8") as f:
-            update_optimizer_template = f.read()
-    except FileNotFoundError:
-        print(f"⚠️ Update optimizer prompt file not found at {UPDATE_OPTIMIZER_PROMPT_FILE}")
-        # Use empty string if file not found - we'll handle this later
-        update_optimizer_template = ""
+    ITERATION_PROMPT_FILE = os.path.join(PROMPTS_DIR, "test_case_iteration_prompt.txt")
+    
+    with open(UPDATE_PROMPT_FILE, "r", encoding="utf-8") as f:
+        update_prompt_template = f.read()
+    
+    with open(UPDATE_CRITIC_PROMPT_FILE, "r", encoding="utf-8") as f:
+        update_critic_template = f.read()
+
+    with open(UPDATE_OPTIMIZER_PROMPT_FILE, "r", encoding="utf-8") as f:
+        update_optimizer_template = f.read()
+        
+    with open(ITERATION_PROMPT_FILE, "r", encoding="utf-8") as f:
+        iteration_prompt_template = f.read()
     
     # Maximum number of iterations for the critique-update loop
     max_iterations = 2
@@ -1752,31 +1720,8 @@ async def update_test_case_content(test_cases_to_update, changed_criteria):
                     break
                 
                 # Add critique step using the template
-                if update_critic_template:
-                    critique_prompt = update_critic_template.replace("{current_test_case}", current_test_case)
-                    critique_prompt = critique_prompt.replace("{changed_requirements}", changed_requirements)
-                else:
-                    # Fall back to hardcoded prompt if file not found
-                    critique_prompt = f"""
-                    You are a test case reviewer. Review this updated test case and ensure it properly reflects the requirement changes.
-
-                    Updated Test Case:
-                    ```json
-                    {current_test_case}
-                    ```
-
-                    The requirements that changed:
-                    {changed_requirements}
-
-                    Check for:
-                    1. Does the test case title reflect the new requirements?
-                    2. Do the test steps implement the new requirements correctly?
-                    3. Do the expected results align with the new requirements?
-                    4. Is there any inconsistency between title, steps, and expected results?
-                    5. Does the test case actually test the new requirements properly?
-
-                    If you find any issues, provide specific feedback about what needs to be fixed.
-                    """
+                critique_prompt = update_critic_template.replace("{current_test_case}", current_test_case)
+                critique_prompt = critique_prompt.replace("{changed_requirements}", changed_requirements)
                 
                 # Get critique
                 critique = await TestCaseCritic.a_generate_reply(
@@ -1788,26 +1733,10 @@ async def update_test_case_content(test_cases_to_update, changed_criteria):
                 with open(critique_file, "w", encoding="utf-8") as f:
                     f.write(critique)
                 
-                # Update the prompt for next iteration
-                update_prompt = f"""
-                You previously updated this test case:
-                ```json
-                {current_test_case}
-                ```
-
-                However, the critic found these issues:
-                {critique}
-
-                Original requirements change:
-                {changed_requirements}
-
-                Please fix ALL the issues identified by the critic and provide a fully updated test case. Make sure:
-                1. ALL parts of the test case (title, steps, expected results) are updated
-                2. ALL parts are consistent with each other
-                3. The test case properly implements the NEW requirements
-
-                Return the improved test case in the same JSON format.
-                """
+                # Update the prompt for next iteration - use the iteration prompt template
+                update_prompt = iteration_prompt_template.replace("{current_test_case}", current_test_case)
+                update_prompt = update_prompt.replace("{critique}", critique)
+                update_prompt = update_prompt.replace("{changed_requirements}", changed_requirements)
                 
             except Exception as e:
                 print(f"⚠️ Error in update iteration {iteration}: {str(e)}")
@@ -1816,31 +1745,8 @@ async def update_test_case_content(test_cases_to_update, changed_criteria):
         # Add optimizer step after the critique-update loops
         try:
             # Create optimizer prompt using template
-            if update_optimizer_template:
-                optimizer_prompt = update_optimizer_template.replace("{current_test_case}", current_test_case)
-                optimizer_prompt = optimizer_prompt.replace("{changed_requirements}", changed_requirements)
-            else:
-                # Fall back to hardcoded prompt if file not found
-                optimizer_prompt = f"""
-                You are a Test Case Optimizer. Optimize this test case to ensure it perfectly aligns with the new requirements.
-
-                Test Case:
-                ```json
-                {current_test_case}
-                ```
-
-                The requirements that changed:
-                {changed_requirements}
-
-                Your task is to:
-                1. Ensure perfect consistency between title, steps, and expected results
-                2. Make sure the test case effectively tests the NEW requirements
-                3. Polish the language for clarity and precision
-                4. Remove any remaining traces of the old requirements
-                5. Ensure environment names follow the new format requirements
-
-                Return the optimized test case in the same JSON format.
-                """
+            optimizer_prompt = update_optimizer_template.replace("{current_test_case}", current_test_case)
+            optimizer_prompt = optimizer_prompt.replace("{changed_requirements}", changed_requirements)
             
             # Get optimized version
             optimized_response = await TestCaseOptimizer.a_generate_reply(
@@ -1987,18 +1893,16 @@ async def compare_criteria_with_llm(original_desc, new_desc):
     """
     from config.config import TestCaseAgent
     
-    # Construct the prompt for semantic comparison
-    prompt = f"""
-Compare these two acceptance criteria and determine if they have the same meaning or different meanings:
-
-Original: "{original_desc}"
-New: "{new_desc}"
-
-Respond with:
-1. Are they semantically equivalent (Yes/No)?
-2. If different, how significant is the change (Low/Medium/High)?
-3. Brief explanation of the difference
-    """
+    # Load the criteria comparison prompt
+    PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "../prompts")
+    COMPARISON_PROMPT_FILE = os.path.join(PROMPTS_DIR, "criteria_comparison_prompt.txt")
+    
+    with open(COMPARISON_PROMPT_FILE, "r", encoding="utf-8") as f:
+        prompt_template = f.read()
+    
+    # Format the prompt with the criteria
+    prompt = prompt_template.replace("{original_criteria}", original_desc)
+    prompt = prompt.replace("{new_criteria}", new_desc)
     
     # Get LLM response
     response = await TestCaseAgent.a_generate_reply(
@@ -2031,5 +1935,4 @@ Respond with:
         "significance": significance,
         "explanation": response
     }
-
 

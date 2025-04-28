@@ -19,9 +19,10 @@ for directory in [LOGS_DIR, OUTPUT_DIR]:
 TEST_CASES_FILE = os.path.join(OUTPUT_DIR, "TestCases.txt")
 GENERATOR_PROMPT_FILE = os.path.join(PROMPTS_DIR, "generator_prompt.txt")
 CRITIC_PROMPT_FILE = os.path.join(PROMPTS_DIR, "critic_prompt.txt")
+OPTIMIZER_PROMPT_FILE = os.path.join(PROMPTS_DIR, "optimizer_prompt.txt")
+FEATURE_REQUIREMENT_FILE = os.path.join(PROMPTS_DIR, "feature_requirement.txt")
 RAW_GENERATOR_RESPONSE_FILE = os.path.join(LOGS_DIR, "RawGeneratorResponse.txt")
 RAW_CRITIC_RESPONSE_FILE = os.path.join(LOGS_DIR, "RawCriticResponse.txt")
-FEATURE_REQUIREMENT_FILE = os.path.join(PROMPTS_DIR, "feature_requirement.txt")
 
 
 async def generate_test_cases(similar_cases=None, max_iterations=2):
@@ -38,23 +39,17 @@ async def generate_test_cases(similar_cases=None, max_iterations=2):
     print("🔹 Generating test cases with refinement and optimization... Please wait.")
 
     # Load prompts and requirements
-    try:
-        with open(GENERATOR_PROMPT_FILE, "r", encoding="utf-8") as f:
-            generator_prompt = f.read()
+    with open(GENERATOR_PROMPT_FILE, "r", encoding="utf-8") as f:
+        generator_prompt = f.read()
 
-        with open(FEATURE_REQUIREMENT_FILE, "r", encoding="utf-8") as f:
-            feature_requirement = f.read()
+    with open(FEATURE_REQUIREMENT_FILE, "r", encoding="utf-8") as f:
+        feature_requirement = f.read()
+    
+    with open(CRITIC_PROMPT_FILE, "r", encoding="utf-8") as f:
+        critic_prompt = f.read()
         
-        with open(CRITIC_PROMPT_FILE, "r", encoding="utf-8") as f:
-            critic_prompt = f.read()
-            
-        # Add this new prompt file
-        OPTIMIZER_PROMPT_FILE = os.path.join(PROMPTS_DIR, "optimizer_prompt.txt")
-        with open(OPTIMIZER_PROMPT_FILE, "r", encoding="utf-8") as f:
-            optimizer_prompt = f.read()
-    except FileNotFoundError as e:
-        print(f"❌ Error: Prompt file not found - {e}")
-        return None
+    with open(OPTIMIZER_PROMPT_FILE, "r", encoding="utf-8") as f:
+        optimizer_prompt = f.read()
     
     # Parse acceptance criteria
     try:
@@ -208,5 +203,6 @@ async def generate_test_cases(similar_cases=None, max_iterations=2):
     print(f"Finalized test cases saved to {TEST_CASES_FILE}")
     
     return final_test_cases
+
 if __name__ == "__main__":
     asyncio.run(generate_test_cases())
