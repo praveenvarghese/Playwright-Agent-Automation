@@ -885,59 +885,6 @@ async def process_and_store_selective_test_cases(test_cases_content, feature_dat
     
     return success
 
-async def clean_deprecated_criteria_references(feature_id, removed_criteria_ids):
-    """
-    Explicitly remove references to deprecated criteria from all test cases.
-    This ensures test cases don't maintain links to criteria that have been removed.
-    
-    Args:
-        feature_id (str): The feature ID
-        removed_criteria_ids (list): List of criteria IDs that were removed
-        
-    Returns:
-        int: Number of test cases updated
-    """
-    if not removed_criteria_ids:
-        print_progress("No criteria were removed, no cleanup needed")
-        return 0
-        
-    print_progress(f"Cleaning up references to {len(removed_criteria_ids)} removed criteria from test cases")
-    
-    # Initialize vector system and embeddings generator
-    vector_system = VectorRetrievalSystem()
-    embeddings_generator = EmbeddingsGenerator()
-    
-    # Get all test cases for this feature
-    test_cases = await vector_system.retrieve_test_cases_by_feature_id(feature_id)
-    updated_count = 0
-    
-    for test_case in test_cases:
-        test_case_id = test_case.get("id")
-        criteria_metadata = test_case.get("criteriaMetadata", []) or []
-        
-        # Check if this test case references any removed criteria
-        original_count = len(criteria_metadata)
-        updated_metadata = [
-            criteria for criteria in criteria_metadata
-            if criteria.get("criteriaId") not in removed_criteria_ids
-        ]
-        
-        # If criteria were removed, update the test case
-        if len(updated_metadata) < original_count:
-            print_progress(f"Removing deprecated criteria references from test case {test_case_id}")
-            test_case["criteriaMetadata"] = updated_metadata
-            
-            # Upload the updated test case
-            success = embeddings_generator.upload_test_case(test_case)
-            if success:
-                updated_count += 1
-                print_success(f"Successfully updated test case {test_case_id}")
-            else:
-                print_warning(f"Failed to update test case {test_case_id}")
-    
-    print_success(f"Cleaned up criteria references in {updated_count} test cases")
-    return updated_count
-
 async def mark_test_cases_inactive(feature_id, test_case_ids, reason="Feature update"):
     """
     Mark specific test cases as inactive.
@@ -997,57 +944,6 @@ async def mark_test_cases_inactive(feature_id, test_case_ids, reason="Feature up
     
     print_success(f"Marked {updated_count} test cases as inactive")
     return updated_count
-
-async def mark_test_case_deprecated(test_case_id, reason="Feature deprecated", replacement_id=None):
-    """
-    Mark a test case as deprecated, which is a step before making it inactive.
-    
-    Args:
-        test_case_id (str): The test case ID to mark as deprecated
-        reason (str): Reason for deprecation
-        replacement_id (str): Optional ID of the replacement test case
-        
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    embeddings_generator = EmbeddingsGenerator()
-    
-    try:
-        # Search for the test case
-        results = list(embeddings_generator.search_client.search(
-            search_text="",
-            filter=f"id eq '{test_case_id}'",
-            select=["*"]
-        ))
-        
-        if not results:
-            print_warning(f"Test case {test_case_id} not found")
-            return False
-            
-        test_case = dict(results[0])
-        
-        # Update the test case status
-        test_case["status"] = "Deprecated"
-        test_case["lastUpdated"] = datetime.now(timezone.utc).isoformat()
-        test_case["statusReason"] = reason
-        
-        # Add a reference to the replacement if provided
-        if replacement_id:
-            test_case["replacedBy"] = replacement_id
-        
-        # Upload the updated test case
-        success = embeddings_generator.upload_test_case(test_case)
-        
-        if success:
-            print_success(f"Successfully marked test case {test_case_id} as deprecated")
-            return True
-        else:
-            print_warning(f"Failed to update test case {test_case_id}")
-            return False
-            
-    except Exception as e:
-        print_error(f"Error updating test case {test_case_id}: {str(e)}")
-        return False
 
 async def mark_deprecated_criteria_in_test_cases(feature_id, removed_criteria_ids, keep_test_cases=[]):
     """
@@ -1370,47 +1266,6 @@ async def fix_null_status_in_test_cases(feature_id):
     
     print(f"✅ Fixed null status in {fixed_count} test cases")
     return fixed_count
-
-async def archive_test_cases(feature_id, reason="Feature archived"):
-    """
-    Archive all test cases for a feature.
-    Used when a feature is completely removed or archived.
-    
-    Args:
-        feature_id (str): The feature ID
-        reason (str): Reason for archiving
-        
-    Returns:
-        int: Number of test cases archived
-    """
-    vector_system = VectorRetrievalSystem()
-    embeddings_generator = EmbeddingsGenerator()
-    
-    # Get all test cases for this feature
-    test_cases = await vector_system.retrieve_test_cases_by_feature_id(feature_id)
-    archived_count = 0
-    
-    for test_case in test_cases:
-        test_case_id = test_case.get("id")
-        
-        # Update the test case status
-        test_case["status"] = "Archived"
-        # test_case["lastUpdated"] = datetime.now(timezone.utc).isoformat()
-        # test_case["statusReason"] = reason
-        # test_case["archivedDate"] = datetime.now(timezone.utc).isoformat()
-        if "featureMetadata" in test_case:
-            test_case["featureMetadata"]["lastUpdated"] = datetime.now(timezone.utc).isoformat()
-        # Upload the updated test case
-        success = embeddings_generator.upload_test_case(test_case)
-        
-        if success:
-            archived_count += 1
-            print_success(f"Successfully archived test case {test_case_id}")
-        else:
-            print_warning(f"Failed to archive test case {test_case_id}")
-    
-    print_success(f"Archived {archived_count} test cases for feature {feature_id}")
-    return archived_count
 
 async def fix_missing_feature_metadata(feature_id, criteria_ids=None):
     """
