@@ -1270,6 +1270,8 @@ async def reactivate_criteria_in_test_cases(feature_id, reactivated_criteria_ids
             criteria_id = criteria.get("criteriaId")
             description = criteria.get("description", "")
             
+            print(f"BEFORE: Criterion {criteria_id} status: {criteria.get('status')}")
+
             if criteria_id in reactivated_criteria_ids:
                 if new_descriptions and criteria_id in new_descriptions:
                     description = new_descriptions[criteria_id]
@@ -1277,13 +1279,13 @@ async def reactivate_criteria_in_test_cases(feature_id, reactivated_criteria_ids
                 new_metadata.append({
                     "criteriaId": criteria_id,
                     "description": description,
-                    "status": "Active"
-                    # No removedDate for active criteria
+                    "status": "Active",
+                    "removedDate": None  # No removedDate for active criteria
                 })
+                   
                 
-                if criteria.get("status") == "Inactive":
-                    updated = True
-                    print(f"🔹 Reactivated criteria {criteria_id} in test case {test_case_id}")
+                updated = True
+                print(f"🔹 Reactivated criteria {criteria_id} in test case {test_case_id}")
             else:
                 # Copy existing criteria with its current status
                 new_criteria = {
@@ -1300,10 +1302,13 @@ async def reactivate_criteria_in_test_cases(feature_id, reactivated_criteria_ids
         
         if updated:
             test_case["criteriaMetadata"] = new_metadata
-            
+            for c in test_case["criteriaMetadata"]:
+                if c.get("criteriaId") in reactivated_criteria_ids:
+                    print(f"TO BE UPLOADED: Criterion {c.get('criteriaId')} status: {c.get('status')}")
+                    
             if "featureMetadata" in test_case:
                 test_case["featureMetadata"]["lastUpdated"] = datetime.now(timezone.utc).isoformat()
-            
+                
             success = embeddings_generator.upload_test_case(test_case)
             if success:
                 updated_count += 1
@@ -2432,6 +2437,13 @@ async def tagged_update_feature_workflow(feature_data):
                 removed_criteria_ids=removed_criteria_ids,
                 keep_test_cases=test_case_decision['keep_unchanged'] + test_case_decision['keep_with_updates']
             )
+
+        if removed_criteria_ids:
+            await update_test_cases_for_removed_criteria(
+                feature_id=feature_data['id'],
+                test_cases=test_case_decision['keep_unchanged'] + test_case_decision['keep_with_updates'],
+                removed_criteria_ids=removed_criteria_ids
+            )
         
         # Mark test cases that need regeneration as inactive
         if test_case_decision['regenerate']:
@@ -2567,4 +2579,121 @@ async def match_criteria_with_llm(criterion_text, existing_criteria):
     except Exception as e:
         print(f"❌ Error using LLM for criteria matching: {str(e)}")
         return None
+
+async def update_test_cases_for_removed_criteria(feature_id, test_cases, removed_criteria_ids):
+    """
+    Update test cases that reference removed criteria to remove steps related to those criteria.
+    
+    Args:
+        feature_id (str): The feature ID
+        test_cases (list): List of test cases to check
+        removed_criteria_ids (list): List of criteria IDs that were removed
+        
+    Returns:
+        int: Number of test cases updated
+    """
+    if not removed_criteria_ids or not test_cases:
+        return 0
+        
+    print(f"🔹 Updating test case content for {len(test_cases)} test cases with removed criteria...")
+    
+    embeddings_generator = EmbeddingsGenerator()
+    updated_count = 0
+    
+    for test_case in test_cases:
+        test_case_id = test_case.get("id")
+        criteria_metadata = test_case.get("criteriaMetadata", []) or []
+        
+        # Check if this test case references any removed criteria
+        has_removed_criteria = any(
+            c.get("criteriaId") in removed_criteria_ids for c in criteria_metadata
+        )
+        
+        if has_removed_criteria:
+            # Get the descriptions of removed criteria
+            removed_descriptions = []
+            for c in criteria_metadata:
+                if c.get("criteriaId") in removed_criteria_ids:
+                    removed_descriptions.append(c.get("description", ""))
+            
+            # Prepare prompt for the LLM
+            from config.config import TestCaseAgent
+            
+            prompt = f"""
+I need to update a test case because some of the acceptance criteria it verified have been removed.
+
+Test Case:
+ID: {test_case.get('id')}
+Title: {test_case.get('title')}
+Steps:
+{test_case.get('steps')}
+Expected Results:
+{test_case.get('expectedResults')}
+
+The following criteria have been REMOVED:
+{chr(10).join(['- ' + desc for desc in removed_descriptions])}
+
+Please update the test case by:
+1. Removing any steps that specifically test the removed criteria
+2. Updating the title if it was focused on the removed functionality
+3. Updating the expected results to match the remaining steps
+4. If the test case was solely testing removed criteria, simplify it to focus on remaining functionality
+
+Return ONLY the updated test case in this format:
+```json
+{{
+  "title": "Updated title",
+  "steps": "Updated steps",
+  "expectedResults": "Updated expected results"
+}}
+```
+"""
+            
+            try:
+                response = await TestCaseAgent.a_generate_reply(
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                
+                # Parse the JSON response
+                import json
+                import re
+                
+                # Extract JSON from response
+                json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response)
+                if json_match:
+                    json_str = json_match.group(1)
+                else:
+                    json_match = re.search(r'({[\s\S]*})', response)
+                    if json_match:
+                        json_str = json_match.group(1)
+                    else:
+                        print(f"⚠️ Could not extract JSON from response for test case {test_case_id}")
+                        continue
+                
+                # Parse the JSON
+                try:
+                    updated_tc = json.loads(json_str)
+                    
+                    # Update the test case with new content
+                    updated_test_case = dict(test_case)
+                    updated_test_case["title"] = updated_tc.get("title", test_case.get("title"))
+                    updated_test_case["steps"] = format_steps(updated_tc.get("steps", test_case.get("steps")))
+                    updated_test_case["expectedResults"] = format_steps(updated_tc.get("expectedResults", test_case.get("expectedResults")))
+                    
+                    # Upload the updated test case
+                    success = embeddings_generator.upload_test_case(updated_test_case)
+                    if success:
+                        updated_count += 1
+                        print(f"✅ Updated content for test case {test_case_id} that referenced removed criteria")
+                    else:
+                        print(f"⚠️ Failed to upload updated test case {test_case_id}")
+                        
+                except json.JSONDecodeError:
+                    print(f"⚠️ Failed to parse JSON response for test case {test_case_id}")
+            
+            except Exception as e:
+                print(f"❌ Error updating test case {test_case_id}: {str(e)}")
+    
+    print(f"✅ Updated content for {updated_count} test cases with removed criteria")
+    return updated_count
 
