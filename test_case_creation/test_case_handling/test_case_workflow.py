@@ -40,8 +40,8 @@ async def read_feature_requirement():
             print_error(f"Error: Feature requirement file not found at {feature_file}")
             return None
             
-        # Process the feature requirement
-        processed_feature = feature_processor.process_and_store_feature_file(feature_file)
+        # Process the feature requirement - ADD THE AWAIT HERE
+        processed_feature = await feature_processor.process_and_store_feature_file(feature_file)
         
         if processed_feature:
             print_success(f"Successfully processed feature: {processed_feature['id']}")
@@ -56,7 +56,7 @@ async def read_feature_requirement():
     except Exception as e:
         print_error(f"Error processing feature requirement: {str(e)}")
         return None
-
+    
 async def read_requirement():
     """Read the test case requirement from the prompt file."""
     try:

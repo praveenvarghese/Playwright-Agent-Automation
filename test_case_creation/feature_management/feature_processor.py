@@ -6,7 +6,7 @@ from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
 from dotenv import load_dotenv
 import uuid
-from test_case_creation.helpers.common_utils import print_progress, print_success, print_warning, print_error # For generating unique IDs for acceptance criteria
+from test_case_creation.helpers.common_utils import print_progress, print_success, print_warning, print_error
 from test_case_creation.data_services.embeddings import EmbeddingsGenerator
 
 # Load environment variables
@@ -32,17 +32,12 @@ class FeatureProcessor:
             credential=AzureKeyCredential(self.search_key)
         )
         
-        # Define paths
+        # Define paths for requirements directory
         self.PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-        self.REGISTRY_PATH = os.path.join(self.PROJECT_ROOT, "data", "feature_registry.json")
         self.REQUIREMENTS_DIR = os.path.join(os.path.dirname(__file__), "../prompts")
         
-        # Ensure directories exist
-        os.makedirs(os.path.dirname(self.REGISTRY_PATH), exist_ok=True)
+        # Ensure requirements directory exists
         os.makedirs(self.REQUIREMENTS_DIR, exist_ok=True)
-        
-        # Initialize or load feature registry
-        self.registry = self._load_registry()
     
     def _validate_config(self):
         """Validate that all required configuration values are present."""
@@ -57,57 +52,60 @@ class FeatureProcessor:
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
     
-    def _load_registry(self):
-        """Load the feature registry from the JSON file, or create it if it doesn't exist."""
-        try:
-            if os.path.exists(self.REGISTRY_PATH):
-                with open(self.REGISTRY_PATH, 'r') as f:
-                    return json.load(f)
-            else:
-                # Initialize empty registry
-                registry = {
-                    "features": {},
-                    "domain_counters": {}
-                }
-                # Save the empty registry
-                with open(self.REGISTRY_PATH, 'w') as f:
-                    json.dump(registry, f, indent=2)
-                return registry
-        except Exception as e:
-            print(f"Error loading registry: {str(e)}")
-            # Return a default empty registry
-            return {"features": {}, "domain_counters": {}}
-    
-    def _save_registry(self):
-        """Save the feature registry to the JSON file."""
-        try:
-            with open(self.REGISTRY_PATH, 'w') as f:
-                json.dump(self.registry, f, indent=2)
-            return True
-        except Exception as e:
-            print(f"Error saving registry: {str(e)}")
-            return False
-    
-    def _generate_feature_id(self, title, description):
-        """Generate a unique feature ID based on title and description."""
+    async def _generate_feature_id(self, title, description):
+        """
+        Generate a unique feature ID based on title and description.
+        Uses the database to determine the next ID counter for a domain.
+        
+        Args:
+            title (str): Feature title
+            description (str): Feature description
+            
+        Returns:
+            str: The generated feature ID
+        """
         # Extract domain code from title or description
         domain_code = self._extract_domain_code(title, description)
         
-        # Get or initialize the counter for this domain
-        if domain_code not in self.registry["domain_counters"]:
-            self.registry["domain_counters"][domain_code] = 0
-        
-        # Increment the counter
-        self.registry["domain_counters"][domain_code] += 1
-        counter = self.registry["domain_counters"][domain_code]
-        
-        # Format the feature ID
-        feature_id = f"FEAT-{domain_code}-{counter:03d}"
-        
-        # Save the updated registry
-        self._save_registry()
-        
-        return feature_id
+        # Get the current highest counter for this domain from the database
+        try:
+            # Create a filter to find features with this domain code
+            filter_str = f"id ge 'FEAT-{domain_code}-000' and id le 'FEAT-{domain_code}-999'"
+            
+            # Search for matching features
+            results = list(self.search_client.search(
+                search_text="*",
+                filter=filter_str,
+                select=["id"],
+                order_by=["id desc"],
+                top=1
+            ))
+            
+            # If any features found, extract the counter
+            if results:
+                # Format is FEAT-DOMAIN-123, we want the 123 part
+                last_id = results[0]["id"]
+                counter_match = re.search(r'FEAT-[A-Z]+-(\d+)', last_id)
+                if counter_match:
+                    # Get the counter and increment it
+                    last_counter = int(counter_match.group(1))
+                    counter = last_counter + 1
+                else:
+                    # If pattern doesn't match, start at 1
+                    counter = 1
+            else:
+                # No features with this domain, start at 1
+                counter = 1
+            
+            # Format the feature ID
+            feature_id = f"FEAT-{domain_code}-{counter:03d}"
+            return feature_id
+            
+        except Exception as e:
+            print_error(f"Error generating feature ID: {str(e)}")
+            # Fallback to using timestamp if database query fails
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            return f"FEAT-{domain_code}-{timestamp}"
         
     def update_feature_test_cases(self, feature_id, test_case_ids):
         """
@@ -289,10 +287,10 @@ class FeatureProcessor:
             return feature
         
         except Exception as e:
-            print(f"Error reading feature requirement: {str(e)}")
+            print_error(f"Error reading feature requirement: {str(e)}")
             return None
     
-    def process_feature(self, feature_data):
+    async def process_feature(self, feature_data):
         """
         Process a feature based on its type (NEW/UPDATE/REMOVE).
         
@@ -308,13 +306,27 @@ class FeatureProcessor:
         if not feature_type or not feature_title:
             raise ValueError("Feature is missing required type or title")
         
-        # Check if this feature already exists in the registry
+        # Check if this feature already exists in the database
         existing_feature_id = None
-        for title, info in self.registry['features'].items():
-            # Case-insensitive comparison
-            if title.lower() == feature_title.lower():
-                existing_feature_id = info['id']
-                break
+        existing_feature = None
+        
+        # Search for features with similar title
+        try:
+            results = list(self.search_client.search(
+                search_text=feature_title,
+                select=["id", "name", "version", "status", "createdDate"],
+                top=10
+            ))
+            
+            # Check for exact title match
+            for result in results:
+                if result.get("name", "").lower() == feature_title.lower():
+                    existing_feature_id = result.get("id")
+                    existing_feature = result
+                    break
+                    
+        except Exception as e:
+            print_warning(f"Error searching for existing feature: {str(e)}")
         
         if feature_type == 'NEW':
             if existing_feature_id:
@@ -322,59 +334,56 @@ class FeatureProcessor:
                 feature_data['id'] = existing_feature_id
             else:
                 # Generate a new feature ID
-                feature_id = self._generate_feature_id(
+                feature_id = await self._generate_feature_id(
                     feature_data.get('title', ''),
                     feature_data.get('description', '')
                 )
                 feature_data['id'] = feature_id
-                
-                # Add to registry
-                self.registry['features'][feature_title] = {
-                    'id': feature_id,
-                    'latest_version': 1,
-                    'status': 'active',
-                    'created': datetime.now(timezone.utc).isoformat(),
-                    'updated': datetime.now(timezone.utc).isoformat()
-                }
-                self._save_registry()
         
         elif feature_type == 'UPDATE':
             if existing_feature_id:
                 feature_data['id'] = existing_feature_id
-                
-                # Update registry
-                self.registry['features'][feature_title]['latest_version'] += 1
-                self.registry['features'][feature_title]['updated'] = datetime.now(timezone.utc).isoformat()
-                self._save_registry()
             else:
                 print(f"Warning: Cannot update non-existent feature '{feature_title}'. Creating as NEW instead.")
-                # Treat as NEW
-                feature_id = self._generate_feature_id(
+                # Generate a new feature ID
+                feature_id = await self._generate_feature_id(
                     feature_data.get('title', ''),
                     feature_data.get('description', '')
                 )
                 feature_data['id'] = feature_id
-                
-                # Add to registry
-                self.registry['features'][feature_title] = {
-                    'id': feature_id,
-                    'latest_version': 1,
-                    'status': 'active',
-                    'created': datetime.now(timezone.utc).isoformat(),
-                    'updated': datetime.now(timezone.utc).isoformat()
-                }
-                self._save_registry()
         
         elif feature_type == 'REMOVE':
             if existing_feature_id:
                 feature_data['id'] = existing_feature_id
-                
-                # Update registry
-                self.registry['features'][feature_title]['status'] = 'deprecated'
-                self.registry['features'][feature_title]['updated'] = datetime.now(timezone.utc).isoformat()
-                self._save_registry()
             else:
                 raise ValueError(f"Cannot remove non-existent feature '{feature_title}'")
+        
+        # Add metadata to feature_data for storage
+        if existing_feature:
+            feature_data['_metadata'] = {
+                'version': existing_feature.get('version', '1'),
+                'status': existing_feature.get('status', 'active'),
+                'createdDate': existing_feature.get('createdDate', datetime.now(timezone.utc).isoformat())
+            }
+            
+            # Update version for UPDATE operations
+            if feature_type == 'UPDATE':
+                try:
+                    current_version = int(feature_data['_metadata']['version'])
+                    feature_data['_metadata']['version'] = str(current_version + 1)
+                except (ValueError, TypeError):
+                    feature_data['_metadata']['version'] = '1'
+            
+            # Update status for REMOVE operations
+            if feature_type == 'REMOVE':
+                feature_data['_metadata']['status'] = 'deprecated'
+        else:
+            # Default metadata for new features
+            feature_data['_metadata'] = {
+                'version': '1',
+                'status': 'active' if feature_type != 'REMOVE' else 'deprecated',
+                'createdDate': datetime.now(timezone.utc).isoformat()
+            }
         
         return feature_data
     
@@ -389,6 +398,15 @@ class FeatureProcessor:
             bool: True if successful, False otherwise
         """
         try:
+            # Get the feature ID and metadata
+            feature_id = feature_data['id']
+            
+            # Get metadata (either from _metadata or use defaults)
+            metadata = feature_data.get('_metadata', {})
+            version = metadata.get('version', '1')
+            status = metadata.get('status', 'active')
+            created_date = metadata.get('createdDate', datetime.now(timezone.utc).isoformat())
+            
             # Prepare acceptance criteria as complex types
             acceptance_criteria = []
             for i, criteria in enumerate(feature_data.get('acceptance_criteria', [])):
@@ -399,30 +417,45 @@ class FeatureProcessor:
                     "addedDate": datetime.now(timezone.utc).isoformat()
                 })
             
+            # Get existing test case IDs if this is an update to preserve them
+            test_case_ids = []
+            if feature_data.get('type', '').upper() in ['UPDATE', 'REMOVE']:
+                try:
+                    results = list(self.search_client.search(
+                        search_text="",
+                        filter=f"id eq '{feature_id}'",
+                        select=["testCaseIds"]
+                    ))
+                    
+                    if results and results[0].get("testCaseIds"):
+                        test_case_ids = results[0].get("testCaseIds")
+                except Exception as e:
+                    print_warning(f"Error retrieving existing test case IDs: {str(e)}")
+            
             # Prepare document for Cognitive Search
             search_doc = {
-                "id": feature_data['id'],
-                "name": feature_data['title'],  # Using 'name' instead of 'title'
-                "description": feature_data['description'],
-                "status": self.registry['features'][feature_data['title']]['status'],
-                "version": str(self.registry['features'][feature_data['title']]['latest_version']),
-                "createdDate": self.registry['features'][feature_data['title']]['created'],
-                "lastUpdated": self.registry['features'][feature_data['title']]['updated'],  # 'lastUpdated' instead of 'updatedDate'
+                "id": feature_id,
+                "name": feature_data['title'],
+                "description": feature_data.get('description', ''),
+                "status": status,
+                "version": version,
+                "createdDate": created_date,
+                "lastUpdated": datetime.now(timezone.utc).isoformat(),
                 "acceptanceCriteria": acceptance_criteria,
-                "testCaseIds": []  # Initialize with empty array of test case IDs
+                "testCaseIds": test_case_ids
             }
             
             # Upload to Azure Cognitive Search
             self.search_client.upload_documents(documents=[search_doc])
-            print(f"Successfully uploaded feature: {feature_data['id']}")
+            print_success(f"Successfully uploaded feature: {feature_id}")
             
             return True
         
         except Exception as e:
-            print(f"Error storing feature: {str(e)}")
+            print_error(f"Error storing feature: {str(e)}")
             return False
     
-    def process_and_store_feature_file(self, file_path):
+    async def process_and_store_feature_file(self, file_path):
         """
         Process a feature requirement file and store the feature in the database.
         
@@ -432,32 +465,30 @@ class FeatureProcessor:
         Returns:
             dict: The processed and stored feature data
         """
-        # Read the feature requirement
+        # Read the feature requirement (using the instance method, not static method)
         feature_data = self.read_feature_requirement(file_path)
         if not feature_data:
-            print(f"Failed to read feature requirement from {file_path}")
+            print_error(f"Failed to read feature requirement from {file_path}")
             return None
         
         # Process the feature based on its type
         try:
-            processed_feature = self.process_feature(feature_data)
+            processed_feature = await self.process_feature(feature_data)
             
             # Store the feature in the database
             success = self.store_feature(processed_feature)
             
             if success:
-                print(f"Successfully processed and stored feature: {processed_feature['id']}")
+                print_success(f"Successfully processed and stored feature: {processed_feature['id']}")
                 return processed_feature
             else:
-                print(f"Failed to store feature from {file_path}")
+                print_error(f"Failed to store feature from {file_path}")
                 return None
         
         except Exception as e:
-            print(f"Error processing feature: {str(e)}")
-            return None
-
-    # Add these methods to your FeatureProcessor class in feature_processor.py
-
+            print_error(f"Error processing feature: {str(e)}")
+            return None  
+         
     def update_feature_with_criteria(self, feature_id, feature_data, updated_criteria, preserve_test_cases=True):
         """
         Update a feature with new criteria while preserving test case links and deprecated criteria.
@@ -500,7 +531,6 @@ class FeatureProcessor:
                     print(f"🔹 Attempting to recover test case IDs by searching test cases...")
                     
                     # Initialize embeddings generator to search for test cases
-                    
                     embeddings_generator = EmbeddingsGenerator()
                     
                     try:
@@ -534,9 +564,9 @@ class FeatureProcessor:
                 "id": feature_id,
                 "name": feature_data.get('title', ''),
                 "description": feature_data.get('description', ''),
-                "status": self.registry['features'][feature_data['title']]['status'],
-                "version": str(self.registry['features'][feature_data['title']]['latest_version']),
-                "createdDate": self.registry['features'][feature_data['title']]['created'],
+                "status": "active",  # Default to active unless specified
+                "version": feature_results[0].get("version", "1") if feature_results else "1",
+                "createdDate": feature_results[0].get("createdDate", datetime.now(timezone.utc).isoformat()) if feature_results else datetime.now(timezone.utc).isoformat(),
                 "lastUpdated": datetime.now(timezone.utc).isoformat(),
                 "acceptanceCriteria": updated_criteria,  # Include ALL criteria, including deprecated
                 "testCaseIds": existing_test_case_ids
@@ -602,7 +632,6 @@ class FeatureProcessor:
             print(f"⚠️ No test case IDs found directly in feature, attempting recovery...")
             
             # Second attempt: Look up test cases that reference this feature
-            
             embeddings_generator = EmbeddingsGenerator()
             
             try:
@@ -704,7 +733,6 @@ class FeatureProcessor:
             print(f"🔹 Feature {feature_id} currently references {len(feature_test_case_ids)} test cases")
             
             # Step 2: Find all test cases that reference this feature
-            
             embeddings_generator = EmbeddingsGenerator()
             
             try:
@@ -841,4 +869,3 @@ class FeatureProcessor:
             results["errors"] += 1
             print(f"❌ Error repairing relationship: {str(e)}")
             return results
-    
