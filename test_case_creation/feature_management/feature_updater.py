@@ -188,12 +188,7 @@ async def update_feature_workflow(feature_data):
             print_warning(f"Couldn't find original feature with ID {feature_id}. Will proceed as new feature.")
             return False
         
-        print_progress(f"Repairing feature-test case relationship before update...")
-        repair_result = feature_processor.repair_feature_test_case_relationship(feature_id)
-        if repair_result["errors"] > 0:
-            print_warning(f"Some errors occurred during relationship repair, but continuing with update")
-        
-        # Step 2: Analyze acceptance criteria changes
+        # Step 2: Analyze acceptance criteria changes - MOVED BEFORE relationship repair
         criteria_changes = await analyze_criteria_changes(
             original_criteria=original_feature.get('acceptanceCriteria', []),
             new_criteria_list=feature_data.get('acceptance_criteria', [])
@@ -215,10 +210,17 @@ async def update_feature_workflow(feature_data):
             len(criteria_changes.get('reactivated', [])) > 0
         )
 
+        # CONSOLIDATED no-changes block with all verification steps
         if not has_criteria_changes:
             print_success(f"No changes detected in criteria. Skipping database update.")
+            print_success("Feature update workflow completed successfully (no changes needed)")
             return True  # Return success but don't update anything
 
+        # Only repair relationships if changes were detected
+        print_progress(f"Changes detected. Repairing feature-test case relationship before update...")
+        repair_result = feature_processor.repair_feature_test_case_relationship(feature_id)
+        if repair_result["errors"] > 0:
+            print_warning(f"Some errors occurred during relationship repair, but continuing with update")
 
         # Track operations and success status
         operations = []
@@ -238,18 +240,6 @@ async def update_feature_workflow(feature_data):
             preserve_test_cases=True
         )
 
-        if not has_criteria_changes:
-            print_success(f"No changes detected in criteria. Skipping database update.")
-            operations.append("No criteria changes detected - skipped database update")
-            
-            # Final verification still needed for consistency
-            print_progress("Running final verification...")
-            await verify_criteria_status_consistency(feature_id)
-            await fix_test_case_metadata_issues(feature_id, fix_null_status=True)
-            
-            print_success("Feature update workflow completed successfully (no changes needed)")
-            return True  # Return success but don't update anything
-            
         # Step 5: Handle different update types with specialized handlers
         
         # 5a. Handle modified criteria
@@ -323,7 +313,7 @@ async def update_feature_workflow(feature_data):
         import traceback
         traceback.print_exc()
         return False
-        
+          
 async def get_original_feature(feature_id):
     """
     Retrieve the original feature data from Azure Cognitive Search.
