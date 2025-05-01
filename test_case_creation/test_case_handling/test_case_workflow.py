@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-
+import re
 # Import modules using the new structure
 from test_case_creation.test_case_handling.generator import generate_test_cases
 from test_case_creation.data_services.vector_search import VectorRetrievalSystem
@@ -245,4 +245,335 @@ async def process_and_store_test_cases(test_cases_content, feature_data=None):
                 for criteria in case.get("criteriaMetadata", []):
                     f.write(f"  - {criteria.get('criteriaId', 'Unknown')}: {criteria.get('description', 'None')}\n")
             f.write("\n---\n\n")
+
+    # Verify criteria coverage - properly placed outside the file writing block
+    if feature_data and 'acceptance_criteria' in feature_data:
+        await verify_criteria_coverage(processed_test_cases, feature_data['acceptance_criteria'], feature_data)
+    
+    return True
+
+async def verify_criteria_coverage(processed_test_cases, acceptance_criteria, feature_data):
+    """
+    Verify that all acceptance criteria are covered by at least one test case.
+    If any criteria are not covered, generate additional test cases.
+    
+    Args:
+        processed_test_cases (list): List of processed test case dictionaries
+        acceptance_criteria (list): List of acceptance criteria
+        feature_data (dict): The feature data
+        
+    Returns:
+        bool: True if all criteria were already covered, False if additional tests were generated
+    """
+    print_progress("Verifying that all acceptance criteria are covered by test cases...")
+    
+    # Extract all criteria IDs that are covered by any test case
+    covered_criteria_ids = set()
+    for test_case in processed_test_cases:
+        criteria_metadata = test_case.get("criteriaMetadata", []) or []
+        for criteria in criteria_metadata:
+            criteria_id = criteria.get("criteriaId")
+            if criteria_id:
+                covered_criteria_ids.add(criteria_id)
+    
+    # Generate all possible criteria IDs
+    all_criteria_ids = [f"AC-{i+1:03d}" for i in range(len(acceptance_criteria))]
+    
+    # Find uncovered criteria
+    uncovered_criteria = []
+    uncovered_descriptions = []
+    uncovered_indices = []
+    for i, criteria_id in enumerate(all_criteria_ids):
+        if criteria_id not in covered_criteria_ids:
+            uncovered_criteria.append({
+                "id": criteria_id,
+                "description": acceptance_criteria[i]
+            })
+            uncovered_descriptions.append(acceptance_criteria[i])
+            uncovered_indices.append(i)
+    
+    if not uncovered_criteria:
+        print_success("✅ All acceptance criteria are covered by at least one test case!")
+        return True
+    
+    # Log uncovered criteria
+    print_warning(f"⚠️ Found {len(uncovered_criteria)} acceptance criteria not covered by any test case:")
+    for criteria in uncovered_criteria:
+        print_warning(f"  - {criteria['id']}: {criteria['description'][:50]}...")
+    
+    # Generate additional test cases for uncovered criteria
+    print_progress("🔹 Generating additional test cases for uncovered criteria...")
+    
+    # Generate test cases focused on uncovered criteria
+    additional_test_cases = await generate_focused_test_cases(feature_data, uncovered_descriptions)
+    
+    if additional_test_cases:
+        # Parse the additional test cases
+        from test_case_creation.helpers.json_parser import parse_test_cases_from_llm_output
+        
+        parsed_additional_cases = parse_test_cases_from_llm_output(additional_test_cases)
+        if not parsed_additional_cases:
+            print_warning("⚠️ Failed to parse additional test cases")
+            return False
+            
+        print_progress(f"🔹 Found {len(parsed_additional_cases)} additional test cases")
+        
+        # Map the additional test cases to criteria using the existing mapping function
+        print_progress("🔹 Mapping additional test cases to criteria...")
+        from test_case_creation.data_services.criteria_mapper import map_test_cases_to_criteria_with_embeddings
+        
+        criteria_mapping = await map_test_cases_to_criteria_with_embeddings(
+            parsed_additional_cases, 
+            acceptance_criteria
+        )
+        
+        # Process and store these test cases
+        embeddings_generator = EmbeddingsGenerator()
+        additional_test_case_ids = []
+        
+        # Process each additional test case
+        for i, case in enumerate(parsed_additional_cases):
+            print_progress(f"Processing additional test case for coverage: {case.get('id')}")
+            
+            # Add feature metadata
+            case["featureMetadata"] = {
+                "featureId": feature_data["id"],
+                "lastUpdated": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+            }
+            
+            # Add criteria metadata from mapping
+            if case["id"] in criteria_mapping:
+                case["criteriaMetadata"] = criteria_mapping[case["id"]]
+                print(f"  Mapped to {len(case['criteriaMetadata'])} acceptance criteria")
+            else:
+                # Fallback mapping to ensure coverage
+                # If mapping failed, directly map to the first uncovered criteria
+                case["criteriaMetadata"] = [{
+                    "criteriaId": uncovered_criteria[0]["id"],
+                    "description": uncovered_criteria[0]["description"],
+                    "status": "Active"
+                }]
+                print(f"  Mapped to {uncovered_criteria[0]['id']} (fallback mapping)")
+            
+            # Upload the test case
+            success = embeddings_generator.upload_test_case(case)
+            if success:
+                additional_test_case_ids.append(case.get("id"))
+                print_success(f"✅ Successfully stored additional test case {case.get('id')}")
+            else:
+                print_warning(f"⚠️ Failed to store additional test case {case.get('id')}")
+        
+        # Update feature with additional test case IDs
+        if additional_test_case_ids:
+            feature_processor = FeatureProcessor()
+            # Get the most recently added test cases to update with feature metadata
+            recent_test_cases = additional_test_case_ids[-min(3, len(additional_test_case_ids)):]
+            update_success = feature_processor.update_feature_test_cases(
+                feature_data["id"], 
+                additional_test_case_ids
+            )
+            
+            if update_success:
+                print_success(f"✅ Successfully updated feature {feature_data['id']} with {len(additional_test_case_ids)} new test cases")
+            else:
+                print_warning(f"⚠️ Failed to update feature {feature_data['id']} with new test cases")
+        
+        print_success(f"✅ Successfully stored {len(additional_test_case_ids)}/{len(parsed_additional_cases)} additional test cases")
+        print_success("✅ Generated additional test cases for criteria coverage!")
+        return False  # Return False to indicate we had to generate additional tests
+    else:
+        print_warning("⚠️ Failed to generate additional test cases for uncovered criteria")
+        return False
+    
+async def process_and_store_additional_test_cases(test_cases_content, feature_data, target_criteria):
+    """
+    Process and store additional test cases generated for criteria coverage.
+    This is a simplified version that won't trigger further coverage checks.
+    
+    Args:
+        test_cases_content (str): Generated test cases content
+        feature_data (dict): Feature data
+        target_criteria (list): List of criteria these test cases should cover
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    print_progress("Processing additional test cases for criteria coverage...")
+    
+    # Parse test cases using the existing parser
+    from test_case_creation.helpers.json_parser import parse_test_cases_from_llm_output
+    
+    parsed_test_cases = parse_test_cases_from_llm_output(test_cases_content)
+    
+    if not parsed_test_cases:
+        print_warning("Failed to parse additional test cases")
+        return False
+    
+    print_progress(f"Found {len(parsed_test_cases)} additional test cases")
+    
+    # Initialize components
+    embeddings_generator = EmbeddingsGenerator()
+    
+    # Create a mapping of criteria descriptions to IDs
+    criteria_map = {}
+    for i, criteria in enumerate(feature_data.get('acceptance_criteria', [])):
+        criteria_id = f"AC-{i+1:03d}"
+        criteria_map[criteria] = criteria_id
+    
+    # Process each test case, focusing on mapping to target criteria
+    stored_count = 0
+    for parsed_case in parsed_test_cases:
+        print(f"Processing additional test case for coverage: {parsed_case.get('id')}")
+        
+        # Add feature metadata
+        parsed_case["featureMetadata"] = {
+            "featureId": feature_data["id"],
+            "lastUpdated": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        }
+        
+        # Create criteria metadata - focus on target criteria
+        parsed_case["criteriaMetadata"] = []
+        test_case_content = (
+            parsed_case.get("title", "") + " " + 
+            parsed_case.get("steps", "") + " " + 
+            parsed_case.get("expectedResults", "")
+        ).lower()
+        
+        # Map to target criteria based on content similarity
+        for criteria in target_criteria:
+            description = criteria.get("description", "")
+            
+            # Simple keyword matching for targeted mapping
+            key_terms = [word for word in description.lower().split() if len(word) >= 4]
+            matching_terms = sum(1 for term in key_terms if term in test_case_content)
+            
+            # If significant match, map to this criteria
+            if matching_terms >= max(2, len(key_terms) // 3):
+                parsed_case["criteriaMetadata"].append({
+                    "criteriaId": criteria.get("id"),
+                    "description": description,
+                    "status": "Active"
+                })
+        
+        # Store the test case
+        success = embeddings_generator.upload_test_case(parsed_case)
+        if success:
+            stored_count += 1
+            print_success(f"Successfully stored additional test case {parsed_case.get('id')}")
+        else:
+            print_warning(f"Failed to store additional test case {parsed_case.get('id')}")
+    
+    # Update feature with new test case IDs
+    if stored_count > 0:
+        feature_processor = FeatureProcessor()
+        test_case_ids = [tc.get("id") for tc in parsed_test_cases]
+        feature_processor.update_feature_test_cases(feature_data["id"], test_case_ids)
+    
+    print_success(f"Successfully stored {stored_count}/{len(parsed_test_cases)} additional test cases")
+    return stored_count > 0
+
+async def generate_coverage_requirement(feature_data, uncovered_criteria, existing_test_cases):
+    """
+    Generate a focused requirement for uncovered criteria.
+    
+    Args:
+        feature_data (dict): Feature data
+        uncovered_criteria (list): List of uncovered criteria descriptions
+        existing_test_cases (list): Existing test cases for context
+        
+    Returns:
+        str: Focused requirement text
+    """
+    # Create a focused requirement based on the existing generator prompt
+    PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "../prompts")
+    generator_prompt_file = os.path.join(PROMPTS_DIR, "generator_prompt.txt")
+    
+    with open(generator_prompt_file, "r", encoding="utf-8") as f:
+        template = f.read()
+    
+    # Format the criteria list
+    criteria_text = "\n".join([f"- {c}" for c in uncovered_criteria])
+    
+    # Create a prefix from the feature name
+    prefix = "ENV"  # Default
+    title = feature_data.get("title", "") or feature_data.get("name", "")
+    if title:
+        words = re.findall(r'[A-Z][a-z]*', title.replace(" ", ""))
+        if words:
+            prefix = "".join(word[0] for word in words).upper()
+            # Ensure prefix is at least 3 chars
+            if len(prefix) < 3:
+                prefix = prefix.ljust(3, 'X')
+    
+    # Add focus instruction
+    focus_instruction = "\n\nIMPORTANT: You MUST generate test cases that verify ALL the acceptance criteria listed above. Every criteria must be verified by at least one test case."
+    
+    # Format the requirement
+    requirement_text = template.replace("{description}", feature_data.get("description", ""))
+    requirement_text = requirement_text.replace("{criteria}", criteria_text + focus_instruction)
+    requirement_text = requirement_text.replace("{prefix}", prefix)
+    
+    return requirement_text
+
+async def generate_focused_test_cases(feature_data, uncovered_criteria):
+    """
+    Generate test cases focused on specific uncovered criteria.
+    
+    Args:
+        feature_data (dict): The feature data
+        uncovered_criteria (list): List of uncovered criteria descriptions
+        
+    Returns:
+        str: Generated test cases content
+    """
+    print_progress(f"🔹 Generating test cases for {len(uncovered_criteria)} uncovered criteria...")
+    
+    # Load the focused generator prompt
+    PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "../prompts")
+    focused_prompt_file = os.path.join(PROMPTS_DIR, "focused_generator_prompt.txt")
+    
+    try:
+        with open(focused_prompt_file, "r", encoding="utf-8") as f:
+            template = f.read()
+    except FileNotFoundError:
+        print_warning(f"⚠️ Focused generator prompt not found at {focused_prompt_file}")
+        # Fall back to the regular generator prompt
+        with open(os.path.join(PROMPTS_DIR, "generator_prompt.txt"), "r", encoding="utf-8") as f:
+            template = f.read()
+            
+        # Add focus instruction
+        template += "\n\nCRITICAL: You MUST generate at least one test case for EACH of the criteria listed below. No criteria should be left uncovered."
+    
+    # Format criteria text
+    criteria_text = "\n".join([f"- {c}" for c in uncovered_criteria])
+    
+    # Replace placeholders in the template
+    prompt = template
+    if "{description}" in prompt:
+        prompt = prompt.replace("{description}", feature_data.get("description", ""))
+    if "{criteria}" in prompt:
+        prompt = prompt.replace("{criteria}", criteria_text)
+        
+    # Use a default prefix if needed
+    if "{prefix}" in prompt:
+        prefix = "ENV"  # Default prefix
+        title = feature_data.get("title", "") or feature_data.get("name", "")
+        if title:
+            # Extract prefix from feature title
+            import re
+            words = re.findall(r'[A-Z][a-z]*', title.replace(" ", ""))
+            if words:
+                prefix = "".join(word[0] for word in words).upper()
+                # Ensure prefix is at least 3 chars
+                if len(prefix) < 3:
+                    prefix = prefix.ljust(3, 'X')
+                    
+        prompt = prompt.replace("{prefix}", prefix)
+    
+    # Generate test cases
+    from test_case_creation.test_case_handling.generator import generate_test_cases
+    
+    return await generate_test_cases(None)  # Use the existing generate_test_cases function
+
+
 

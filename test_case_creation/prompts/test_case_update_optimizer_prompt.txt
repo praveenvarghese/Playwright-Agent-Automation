@@ -20,4 +20,8 @@ Your task is to:
 5. Ensure environment names follow the new format requirements
 6. If there are more than 5 steps, keep ONLY the most essential 5 steps
 
+When a test case references a criteria it's not mapped to, either:
+1. Add the missing criteria mapping, OR
+2. Remove the reference to that criteria from the test case content
+
 Return the optimized test case in the same JSON format.

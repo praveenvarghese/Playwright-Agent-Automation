@@ -16,6 +16,11 @@ CRITICAL CHECKS:
 5. Is there any inconsistency between title, steps, and expected results?
 6. Does the test case actually test the new requirements properly?
 
+For EACH test case, verify:
+1. Does it properly test ALL criteria it's mapped to?
+2. Does it reference criteria it's NOT mapped to?
+3. Are there ANY contradictions between test case content and the criteria?
+
 If the test case has more than 5 steps, this MUST be flagged as a critical issue to be fixed immediately.
 The test case should focus only on the main scenario, or multiple test cases should be created instead.
 

@@ -1,0 +1,29 @@
+You are a Test Case Analyst evaluating a test case affected by removed acceptance criteria.
+
+CURRENT TEST CASE:
+{test_case_json}
+
+REMOVED CRITERIA:
+{removed_criteria_json}
+
+REMAINING CRITERIA THIS TEST CASE VERIFIES:
+{remaining_criteria_json}
+
+Please analyze whether this test case should be:
+
+1. KEPT AS IS - The test case still provides value and effectively tests the remaining criteria without modification
+2. UPDATED - The test case needs content updates to focus on the remaining criteria but the core scenario is still valid
+3. REGENERATED - The test case is so dependent on the removed criteria that it should be marked inactive and replaced
+
+Consider:
+- What percentage of the test case's purpose depended on the removed criteria?
+- Does the test case still verify important functionality without the removed criteria?
+- Would the steps and expected results still make sense if focused only on the remaining criteria?
+- Is this the only test case verifying some important remaining criteria?
+
+Respond with:
+1. Your recommended action (KEEP/UPDATE/REGENERATE)
+2. Brief justification for your decision
+3. If UPDATE, specific suggestions for what should be changed
+
+FORMAT YOUR RESPONSE WITH "RECOMMENDED ACTION: [KEEP/UPDATE/REGENERATE]" ON THE FIRST LINE.

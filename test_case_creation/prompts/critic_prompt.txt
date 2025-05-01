@@ -12,6 +12,11 @@ Check that:
 - All test cases focus on core environment management functionality
 - ALL acceptance criteria are covered by at least one test case
 
+For EACH test case, verify:
+1. Does it properly test ALL criteria it's mapped to?
+2. Does it reference criteria it's NOT mapped to?
+3. Are there ANY contradictions between test case content and the criteria?
+
 The acceptance criteria are:
 {acceptance_criteria}
 

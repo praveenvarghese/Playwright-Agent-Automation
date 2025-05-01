@@ -9,6 +9,10 @@ Review the provided test cases and optimize them by:
 5. Never combine test cases if it would result in multiple acceptance criteria being tested
 6. Preserve clear expected results
 
+When a test case references a criteria it's not mapped to, either:
+1. Add the missing criteria mapping, OR
+2. Remove the reference to that criteria from the test case content
+
 Guidelines for optimization:
 - Test cases can often be combined when they differ only in input data
 - NEVER combine test cases that test different functions or criteria
