@@ -701,8 +701,8 @@ async def generate_requirement_text(feature_data, added_criteria, modified_crite
     focus_criteria = added_criteria + modified_criteria
     
     # Read the generator prompt template
-    prompt_file = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")), 
-                             "prompts", "generator_prompt.txt")
+    PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "../prompts")
+    prompt_file = os.path.join(PROMPTS_DIR, "generator_prompt.txt")
     
     with open(prompt_file, "r", encoding="utf-8") as f:
         template = f.read()
