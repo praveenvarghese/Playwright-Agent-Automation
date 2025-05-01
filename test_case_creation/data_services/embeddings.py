@@ -288,6 +288,13 @@ class EmbeddingsGenerator:
                 print(f"Skipping upload for test case ID {test_case.get('id')} - missing required fields")
                 return False
             
+            if isinstance(test_case.get("steps"), list):
+                test_case["steps"] = "\n".join(test_case.get("steps"))
+
+            # Same for expected results
+            if isinstance(test_case.get("expectedResults"), list):
+                test_case["expectedResults"] = "\n".join(test_case.get("expectedResults"))
+            
             # Ensure all required metadata fields exist
             if not test_case.get("createdDate"):
                 test_case["createdDate"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

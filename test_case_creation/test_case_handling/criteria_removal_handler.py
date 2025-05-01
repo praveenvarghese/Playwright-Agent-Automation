@@ -258,6 +258,13 @@ async def mark_deprecated_criteria_in_test_cases_with_critique(feature_id, remov
                         updated_test_case["steps"] = updated_tc.get("steps", test_case.get("steps", ""))
                         updated_test_case["expectedResults"] = updated_tc.get("expectedResults", test_case.get("expectedResults", ""))
                         
+                        if isinstance(updated_tc.get("steps"), list):
+                            updated_tc["steps"] = "\n".join(updated_tc.get("steps"))
+
+                        # Same for expected results
+                        if isinstance(updated_tc.get("expectedResults"), list):
+                            updated_tc["expectedResults"] = "\n".join(updated_tc.get("expectedResults"))
+                            
                         # Update criteria metadata
                         updated_criteria_metadata = []
                         for criteria in criteria_metadata:
