@@ -14,6 +14,7 @@ from test_case_creation.data_services.embeddings import EmbeddingsGenerator
 from test_case_creation.config.config import TestCaseAgent, TestCaseCritic, TestCaseOptimizer
 from test_case_creation.test_case_handling.test_case_workflow import process_and_store_test_cases
 from test_case_creation.test_case_handling.criteria_removal_handler import mark_deprecated_criteria_in_test_cases_with_critique
+from test_case_creation.data_services.criteria_mapper import map_test_cases_to_feature_criteria
 import time
    
 
@@ -27,7 +28,7 @@ def print_error(message): print(f"❌ {message}")
 async def analyze_criteria_changes(original_criteria, new_criteria_list):
     """
     Analyze changes between original and new acceptance criteria.
-    Enhanced to use LLM for semantic understanding of requirement changes.
+    Modified to always treat new criteria as added, never as reactivated.
     
     Args:
         original_criteria (list): List of original criteria objects with id and description
@@ -41,23 +42,21 @@ async def analyze_criteria_changes(original_criteria, new_criteria_list):
         "modified": [],
         "added": [],
         "removed": [],
-        "reactivated": []  # New category for previously deprecated criteria being added back
+        # Note: "reactivated" category removed
     }
     
     # Debug output
     print(f"🔹 Original criteria count: {len(original_criteria)}")
     print(f"🔹 New criteria count: {len(new_criteria_list)}")
     
-    # Separate active and deprecated criteria for better processing
+    # We only care about active criteria now
     active_criteria = [c for c in original_criteria if c.get("status", "Active") == "Active"]
-    deprecated_criteria = [c for c in original_criteria if c.get("status", "") == "Deprecated"]
     
     print(f"🔹 Active criteria: {len(active_criteria)}")
-    print(f"🔹 Deprecated criteria: {len(deprecated_criteria)}")
+    # Removed the debugging for deprecated criteria
     
     # Convert lists to lowercase for easier comparison
     active_desc_list = [c.get("description", "").lower().strip() for c in active_criteria]
-    deprecated_desc_list = [c.get("description", "").lower().strip() for c in deprecated_criteria]
     new_desc_list = [desc.lower().strip() for desc in new_criteria_list]
     
     # Step 1: Find unchanged active criteria
@@ -74,24 +73,8 @@ async def analyze_criteria_changes(original_criteria, new_criteria_list):
                 matched_new_indices.add(j)
                 break
     
-    # Step 2: Check if any new criteria match previously deprecated criteria
-    matched_deprecated_indices = set()
-    
-    for i, deprecated in enumerate(deprecated_criteria):
-        deprecated_desc_lower = deprecated_desc_list[i]
-        
-        for j, new_desc_lower in enumerate(new_desc_list):
-            if j in matched_new_indices:
-                continue
-                
-            # Check for exact match or high similarity
-            if deprecated_desc_lower == new_desc_lower or calculate_text_similarity(deprecated_desc_lower, new_desc_lower) > 0.9:
-                # This is a previously deprecated criteria that's being added back
-                result["reactivated"].append((deprecated, new_criteria_list[j]))
-                matched_deprecated_indices.add(i)
-                matched_new_indices.add(j)
-                print(f"🔹 Found reactivated criteria: {deprecated.get('id')} - {deprecated_desc_lower[:50]}...")
-                break
+    # Step 2: Skip reactivation detection completely
+    # The old reactivation code has been removed
     
     # Step 3: Use LLM to compare remaining criteria for semantic differences
     for i, original in enumerate(active_criteria):
@@ -153,9 +136,9 @@ async def analyze_criteria_changes(original_criteria, new_criteria_list):
             result["added"].append(new_desc)
             print(f"🔹 Detected added criteria: {new_desc[:50]}...")
     
-    # Print summary
+    # Print summary - updated to remove reference to reactivated
     print(f"🔹 Changes detected: {len(result['unchanged'])} unchanged, {len(result['modified'])} modified, " +
-          f"{len(result['added'])} added, {len(result['removed'])} removed, {len(result['reactivated'])} reactivated")
+          f"{len(result['added'])} added, {len(result['removed'])} removed")
     
     return result
 
@@ -163,7 +146,8 @@ async def analyze_criteria_changes(original_criteria, new_criteria_list):
 
 async def update_feature_workflow(feature_data):
     """
-    Enhanced workflow for updating an existing feature with modular handling of different update types.
+    Enhanced workflow for updating an existing feature.
+    Now acts as a router to specialized handlers based on update type.
     
     Args:
         feature_data (dict): The processed feature data with the update
@@ -178,142 +162,39 @@ async def update_feature_workflow(feature_data):
     print_progress(f"Starting enhanced update workflow for feature: {feature_data['id']}")
     feature_id = feature_data['id']
     
-    # Initialize components
-    feature_processor = FeatureProcessor()
-    
     try:
-        # Step 1: Get original feature data
+        # Get original feature data
         original_feature = await get_original_feature(feature_id)
         if not original_feature:
             print_warning(f"Couldn't find original feature with ID {feature_id}. Will proceed as new feature.")
             return False
         
-        # Step 2: Analyze acceptance criteria changes - MOVED BEFORE relationship repair
-        criteria_changes = await analyze_criteria_changes(
-            original_criteria=original_feature.get('acceptanceCriteria', []),
-            new_criteria_list=feature_data.get('acceptance_criteria', [])
-        )
+        # Determine update type
+        update_type, criteria_changes = await handle_determine_update_type(feature_data, original_feature)
         
-        # Log the analysis results
-        print_progress(f"Acceptance criteria analysis complete:")
-        print_progress(f" - Unchanged: {len(criteria_changes['unchanged'])}")
-        print_progress(f" - Modified: {len(criteria_changes['modified'])}")
-        print_progress(f" - Added: {len(criteria_changes['added'])}")
-        print_progress(f" - Removed: {len(criteria_changes['removed'])}")
-        print_progress(f" - Reactivated: {len(criteria_changes.get('reactivated', []))}")
-        
-        # Check if any changes were detected
-        has_criteria_changes = (
-            len(criteria_changes['modified']) > 0 or 
-            len(criteria_changes['added']) > 0 or 
-            len(criteria_changes['removed']) > 0 or 
-            len(criteria_changes.get('reactivated', [])) > 0
-        )
-
-        # CONSOLIDATED no-changes block with all verification steps
-        if not has_criteria_changes:
-            print_success(f"No changes detected in criteria. Skipping database update.")
+        # Route to the appropriate handler based on update type
+        if update_type == "NO_CHANGES":
+            print_success(f"No changes detected in criteria. Skipping ALL database operations.")
             print_success("Feature update workflow completed successfully (no changes needed)")
-            return True  # Return success but don't update anything
-
-        # Only repair relationships if changes were detected
-        print_progress(f"Changes detected. Repairing feature-test case relationship before update...")
-        repair_result = feature_processor.repair_feature_test_case_relationship(feature_id)
-        if repair_result["errors"] > 0:
-            print_warning(f"Some errors occurred during relationship repair, but continuing with update")
-
-        # Track operations and success status
-        operations = []
-        overall_success = True
-        
-        # Step 3: Create updated acceptance criteria objects
-        updated_criteria_objects = create_updated_criteria_objects(
-            original_criteria=original_feature.get('acceptanceCriteria', []),
-            criteria_changes=criteria_changes
-        )
-        
-        # Step 4: Update the feature with new criteria
-        feature_update_success = feature_processor.update_feature_with_criteria(
-            feature_id=feature_id,
-            feature_data=feature_data,
-            updated_criteria=updated_criteria_objects,
-            preserve_test_cases=True
-        )
-
-        # Step 5: Handle different update types with specialized handlers
-        
-        # 5a. Handle modified criteria
-        if criteria_changes['modified']:
-            print_progress(f"Processing {len(criteria_changes['modified'])} modified criteria...")
-            mod_success = await handle_modified_criteria(
-                feature_id=feature_id,
-                modified_criteria=criteria_changes['modified'],
-                criteria_map=get_criteria_id_map(updated_criteria_objects)
-            )
-            operations.append(f"Modified criteria: {'✅ Success' if mod_success else '❌ Failed'}")
-            overall_success = overall_success and mod_success
-        
-        # 5b. Handle added criteria
-        if criteria_changes['added']:
-            print_progress(f"Processing {len(criteria_changes['added'])} added criteria...")
-            add_success = await handle_added_criteria(
-                feature_id=feature_id,
-                feature_data=feature_data,
-                added_criteria=criteria_changes['added'],
-                updated_criteria_objects=updated_criteria_objects
-            )
-            operations.append(f"Added criteria: {'✅ Success' if add_success else '❌ Failed'}")
-            overall_success = overall_success and add_success
-        
-        # 5c. Handle removed criteria
-        if criteria_changes['removed']:
-            print_progress(f"Processing {len(criteria_changes['removed'])} removed criteria...")
-            removed_criteria_ids = [c.get("id") for c in criteria_changes["removed"]]
-            rem_success = await handle_removed_criteria(
-                feature_id=feature_id,
-                removed_criteria_ids=removed_criteria_ids,
-                criteria_map=get_criteria_id_map(updated_criteria_objects)
-            )
-            operations.append(f"Removed criteria: {'✅ Success' if rem_success else '❌ Failed'}")
-            overall_success = overall_success and rem_success
-        
-        # 5d. Handle reactivated criteria
-        if 'reactivated' in criteria_changes and criteria_changes['reactivated']:
-            print_progress(f"Processing {len(criteria_changes['reactivated'])} reactivated criteria...")
-            reactivated_criteria_ids = [reactivated[0].get('id') for reactivated in criteria_changes['reactivated']]
-            react_success = await handle_reactivated_criteria(
-                feature_id=feature_id,
-                reactivated_criteria_ids=reactivated_criteria_ids,
-                criteria_changes=criteria_changes
-            )
-            operations.append(f"Reactivated criteria: {'✅ Success' if react_success else '❌ Failed'}")
-            overall_success = overall_success and react_success
+            return True
+        elif update_type == "MODIFIED":
+            return await handle_update_with_modified_criteria_flow(feature_data, original_feature, criteria_changes)
+        elif update_type == "ADDED":
+            return await handle_update_with_added_criteria_flow(feature_data, original_feature, criteria_changes)
+        elif update_type == "REMOVED":
+            return await handle_update_with_removed_criteria_flow(feature_data, original_feature, criteria_changes)
+        elif update_type == "COMBINED":
+            return await handle_combined_update_flow(feature_data, original_feature, criteria_changes)
+        else:
+            print_error(f"Unknown update type: {update_type}")
+            return False
             
-        # Step 6: Verify and fix metadata consistency
-        print_progress(f"Verifying criteria status consistency...")
-        await verify_criteria_status_consistency(feature_id)
-        
-        # Final metadata verification
-        print_progress(f"Performing final metadata verification...")
-        final_fixes = await fix_test_case_metadata_issues(feature_id, fix_null_status=True)
-        if final_fixes > 0:
-            print_success(f"Fixed metadata issues in {final_fixes} test cases during final verification")
-        
-        if operations:
-            print_success("Feature update summary:")
-            for op in operations:
-                print_progress(f"  - {op}")
-            
-        print_success(f"Feature update workflow completed successfully for {feature_id}")
-        return overall_success
-        
     except Exception as e:
-        print_error(f"Error in feature update workflow: {str(e)}")
-        # Log the full error with traceback
+        print_error(f"Error in update feature workflow: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
-          
+                    
 async def get_original_feature(feature_id):
     """
     Retrieve the original feature data from Azure Cognitive Search.
@@ -481,21 +362,11 @@ def create_updated_criteria_objects(original_criteria, criteria_changes):
         updated_criteria.append(updated)
     print(f"🔹 Added {len(criteria_changes['modified'])} modified criteria")
     
-    # 3. Handle reactivated criteria - previously deprecated but now being added back
-    for deprecated, new_description in criteria_changes["reactivated"]:
-        # Reuse the original ID but update description and status
-        reactivated = {
-            "id": deprecated.get("id", ""),
-            "description": new_description,
-            "status": "Active",  # Change from Deprecated to Active
-            "addedDate": datetime.now(timezone.utc).isoformat()  # Update timestamp
-        }
-        updated_criteria.append(reactivated)
-        print(f"🔹 Reactivated criteria {deprecated.get('id')} (changed from Deprecated to Active)")
+    # 3. Removed the reactivated criteria handling code
     
     # 4. Add new criteria with new IDs
     next_id = 1
-    # Find the highest existing ID number
+    # Find the highest existing ID number from ALL criteria (active or not)
     for criteria in original_criteria:
         criteria_id = criteria.get("id", "")
         if criteria_id.startswith("AC-"):
@@ -517,37 +388,6 @@ def create_updated_criteria_objects(original_criteria, criteria_changes):
             "addedDate": datetime.now(timezone.utc).isoformat()
         })
     print(f"🔹 Added {len(criteria_changes['added'])} new criteria")
-    
-    # 5. Add removed criteria with deprecated status
-    for removed in criteria_changes["removed"]:
-        # Create with ONLY the fields in the feature schema
-        deprecated_criteria = {
-            "id": removed.get("id", ""),
-            "description": removed.get("description", ""),
-            "status": "Deprecated",  # Mark as deprecated
-            "addedDate": datetime.now(timezone.utc).isoformat()
-        }
-        updated_criteria.append(deprecated_criteria)
-        print(f"🔹 Marked removed criteria {removed.get('id')} as Deprecated")
-    
-    # 6. Include already deprecated criteria that weren't reactivated
-    for criteria in original_criteria:
-        if criteria.get("status", "") == "Deprecated":
-            # Check if this deprecated criteria was reactivated
-            was_reactivated = any(
-                deprecated.get("id") == criteria.get("id") 
-                for deprecated, _ in criteria_changes["reactivated"]
-            )
-            
-            if not was_reactivated:
-                # Keep it as deprecated but ensure only schema fields are present
-                updated_criteria.append({
-                    "id": criteria.get("id", ""),
-                    "description": criteria.get("description", ""),
-                    "status": "Deprecated",
-                    "addedDate": criteria.get("addedDate", datetime.now(timezone.utc).isoformat())
-                })
-                print(f"🔹 Kept existing deprecated criteria {criteria.get('id')}")
     
     print(f"🔹 Total updated criteria: {len(updated_criteria)}")
     return updated_criteria
@@ -1998,62 +1838,307 @@ async def handle_added_criteria(feature_id, feature_data, added_criteria, update
             return False
         
         # Step 4: Process and store the new test cases
-        process_success = await process_and_store_selective_test_cases(
-            new_test_cases_content, feature_data, updated_criteria_objects
-        )
+        from test_case_creation.helpers.json_parser import parse_test_cases_from_llm_output
+        from test_case_creation.data_services.criteria_mapper import map_test_cases_to_feature_criteria
         
-        if process_success:
-            print_success(f"Successfully processed and stored new test cases for added criteria")
-            return True
-        else:
-            print_warning(f"Failed to process new test cases for added criteria")
+        parsed_additional_cases = parse_test_cases_from_llm_output(new_test_cases_content)
+        if not parsed_additional_cases:
+            print_warning("⚠️ Failed to parse additional test cases")
             return False
             
+        print_progress(f"🔹 Found {len(parsed_additional_cases)} additional test cases")
+        
+        # Step 5: Map the additional test cases to criteria using our feature database function
+        # IMPORTANT: This is the key change - use the new mapping function
+        print_progress("🔹 Mapping additional test cases to criteria using feature database...")
+        try:
+            criteria_mapping = await map_test_cases_to_feature_criteria(
+                parsed_additional_cases, 
+                feature_id  # Pass feature ID to get criteria from database
+            )
+        except Exception as e:
+            print_error(f"Error mapping test cases to criteria: {str(e)}")
+            # Fallback mapping if needed
+            criteria_mapping = {}
+        
+        # Step 6: Process and store these test cases
+        embeddings_generator = EmbeddingsGenerator()
+        additional_test_case_ids = []
+        
+        # Process each additional test case
+        for i, case in enumerate(parsed_additional_cases):
+            print_progress(f"Processing additional test case for coverage: {case.get('id')}")
+            
+            # Add feature metadata
+            case["featureMetadata"] = {
+                "featureId": feature_id,
+                "lastUpdated": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+            }
+            
+            # Add criteria metadata from mapping
+            if case["id"] in criteria_mapping and criteria_mapping[case["id"]]:
+                case["criteriaMetadata"] = criteria_mapping[case["id"]]
+                print(f"  Mapped to {len(case['criteriaMetadata'])} acceptance criteria")
+            else:
+                # Fallback mapping - find active criteria to use
+                active_criteria = [c for c in updated_criteria_objects if c.get("status", "Active") == "Active"]
+                if active_criteria:
+                    first_criteria = active_criteria[0]
+                    case["criteriaMetadata"] = [{
+                        "criteriaId": first_criteria["id"],
+                        "description": first_criteria["description"],
+                        "status": "Active"
+                    }]
+                    print(f"  Mapped to {first_criteria['id']} using fallback")
+                else:
+                    print_warning(f"No active criteria found for fallback mapping")
+                    # Create empty criteria metadata to avoid errors
+                    case["criteriaMetadata"] = []
+            
+            # Upload the test case
+            success = embeddings_generator.upload_test_case(case)
+            if success:
+                additional_test_case_ids.append(case.get("id"))
+                print_success(f"✅ Successfully stored additional test case {case.get('id')}")
+            else:
+                print_warning(f"⚠️ Failed to store additional test case {case.get('id')}")
+        
+        # Update feature with additional test case IDs
+        if additional_test_case_ids:
+            feature_processor = FeatureProcessor()
+            update_success = feature_processor.update_feature_test_cases(
+                feature_id, 
+                additional_test_case_ids
+            )
+            
+            if update_success:
+                print_success(f"✅ Successfully updated feature {feature_id} with {len(additional_test_case_ids)} new test cases")
+            else:
+                print_warning(f"⚠️ Failed to update feature {feature_id} with new test cases")
+        
+        print_success(f"✅ Successfully stored {len(additional_test_case_ids)}/{len(parsed_additional_cases)} additional test cases")
+        return True
+        
     except Exception as e:
         print_error(f"Error handling added criteria: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
-    
-async def handle_removed_criteria(feature_id, removed_criteria_ids, criteria_map):
+       
+async def handle_removed_criteria(feature_id, removed_criteria_ids, criteria_map=None):
     """
-    Specialized handler for removed criteria.
-    Marks criteria as inactive in test cases and/or marks test cases as inactive.
+    Handle removed criteria by completely removing them from test cases.
+    - Delete test cases that have no criteria left after removal
+    - For other test cases, completely remove the criteria entries
     
     Args:
         feature_id (str): The feature ID
         removed_criteria_ids (list): List of criteria IDs that were removed
-        criteria_map (dict): Mapping of criteria IDs to details
+        criteria_map (dict): Optional mapping of criteria IDs (kept for compatibility)
         
     Returns:
         bool: True if successful, False otherwise
     """
-    print_progress(f"Running specialized handler for {len(removed_criteria_ids)} removed criteria")
+    print_progress(f"Running enhanced strict removal handler for {len(removed_criteria_ids)} removed criteria")
     
     if not removed_criteria_ids:
         return True  # Nothing to do
     
     try:
-        # Use the existing AI critique flow for removed criteria
-        results = await mark_deprecated_criteria_in_test_cases_with_critique(
-            feature_id=feature_id,
-            removed_criteria_ids=removed_criteria_ids,
-            criteria_map=criteria_map
-        )
+        # Initialize components
+        vector_system = VectorRetrievalSystem()
+        embeddings_generator = EmbeddingsGenerator()
         
-        print_progress(f"AI critique flow results:")
-        print_progress(f" - Kept: {results['kept']} test cases")
-        print_progress(f" - Updated: {results['updated']} test cases")
-        print_progress(f" - Marked for regeneration: {results['regenerated']} test cases")
+        # Get test cases for this feature
+        test_cases = await vector_system.retrieve_test_cases_by_feature_id(feature_id)
+        print_progress(f"Found {len(test_cases)} test cases to analyze")
         
-        return results['errors'] == 0  # Success if no errors
+        # Track test cases to delete and update
+        test_cases_to_delete = []
+        test_cases_to_update = []
+        
+        # Analyze each test case
+        for test_case in test_cases:
+            test_case_id = test_case.get("id")
+            
+            # Get a deep copy of criteria metadata to ensure we're working with a clean list
+            criteria_metadata = test_case.get("criteriaMetadata", []) or []
+            if isinstance(criteria_metadata, list):
+                criteria_metadata = list(criteria_metadata)  # Create a new list to avoid reference issues
+            else:
+                criteria_metadata = []  # Fallback if criteriaMetadata isn't a list
+                
+            print_progress(f"Analyzing test case {test_case_id} with {len(criteria_metadata)} criteria")
+            
+            # Debug: Print all criteria in this test case
+            for c in criteria_metadata:
+                print_progress(f"  - Criteria: {c.get('criteriaId')} - {c.get('status')}")
+                if c.get('criteriaId') in removed_criteria_ids:
+                    print_progress(f"    ⚠️ This criteria should be removed")
+            
+            # Create a new list WITHOUT the removed criteria
+            # Use a more direct filtering approach
+            new_criteria_metadata = []
+            for criteria in criteria_metadata:
+                if criteria.get("criteriaId") not in removed_criteria_ids:
+                    new_criteria_metadata.append(criteria)
+                else:
+                    print_progress(f"  ✅ Excluding criteria {criteria.get('criteriaId')} from updated test case")
+            
+            # If we removed any criteria
+            if len(new_criteria_metadata) != len(criteria_metadata):
+                removed_count = len(criteria_metadata) - len(new_criteria_metadata)
+                print_progress(f"Removed {removed_count} criteria entries from test case {test_case_id}")
+                
+                # Debug: Print the new criteria list
+                print_progress(f"New criteria list for {test_case_id} contains {len(new_criteria_metadata)} entries:")
+                for c in new_criteria_metadata:
+                    print_progress(f"  - {c.get('criteriaId')} - {c.get('status')}")
+                
+                # If no criteria left, delete the test case
+                if len(new_criteria_metadata) == 0:
+                    test_cases_to_delete.append(test_case_id)
+                    print_progress(f"Test case {test_case_id} has no remaining criteria - will be deleted")
+                else:
+                    # Create a completely new test case object to avoid reference issues
+                    updated_test_case = {
+                        "id": test_case.get("id"),
+                        "title": test_case.get("title"),
+                        "steps": test_case.get("steps"),
+                        "expectedResults": test_case.get("expectedResults"),
+                        "createdDate": test_case.get("createdDate"),
+                        "status": test_case.get("status", "Active"),
+                        "version": test_case.get("version", "1.0"),
+                        # Preserve feature metadata
+                        "featureMetadata": test_case.get("featureMetadata"),
+                        # Set completely new criteria metadata array
+                        "criteriaMetadata": new_criteria_metadata
+                    }
+                    
+                    test_cases_to_update.append(updated_test_case)
+                    print_progress(f"Test case {test_case_id} will be updated with {len(new_criteria_metadata)} remaining criteria")
+        
+        # Delete test cases that have no remaining criteria
+        deleted_count = 0
+        if test_cases_to_delete:
+            print_progress(f"Deleting {len(test_cases_to_delete)} test cases with no remaining criteria")
+            
+        for test_case in test_cases_to_update:
+            try:
+                # 1. First, fetch the latest version of the test case
+                tc_results = list(embeddings_generator.search_client.search(
+                    search_text="",
+                    filter=f"id eq '{test_case['id']}'",
+                    select=["*"]
+                ))
+                
+                if tc_results:
+                    current_tc = dict(tc_results[0])
+                    
+                    # 2. Create a completely new criteria metadata list WITHOUT the removed criteria
+                    new_criteria_metadata = [
+                        c for c in current_tc.get("criteriaMetadata", [])
+                        if c.get("criteriaId") not in removed_criteria_ids
+                    ]
+                    
+                    # 3. Create a complete new document with ALL fields
+                    updated_test_case = {
+                        "id": current_tc["id"],
+                        "title": current_tc.get("title", ""),
+                        "steps": current_tc.get("steps", ""),
+                        "expectedResults": current_tc.get("expectedResults", ""),
+                        "createdDate": current_tc.get("createdDate", ""),
+                        "status": current_tc.get("status", "Active"),
+                        "version": current_tc.get("version", "1.0"),
+                        "featureMetadata": current_tc.get("featureMetadata", {}),
+                        "criteriaMetadata": new_criteria_metadata  # Set completely new list
+                    }
+                    
+                    # 4. Delete the old document first
+                    embeddings_generator.search_client.delete_documents(documents=[{"id": current_tc["id"]}])
+                    
+                    # 5. Wait a bit for deletion to process
+                    import time
+                    time.sleep(1)
+                    
+                    # 6. Upload as a completely new document
+                    success = embeddings_generator.upload_test_case(updated_test_case)
+                    
+                    if success:
+                        print_success(f"Successfully updated test case {test_case['id']} by delete and recreate")
+            except Exception as e:
+                print_error(f"Error updating test case: {str(e)}")
+        # Update test cases that have remaining criteria
+        updated_count = 0
+        if test_cases_to_update:
+            print_progress(f"Updating {len(test_cases_to_update)} test cases to remove all references to removed criteria")
+            
+            for updated_test_case in test_cases_to_update:
+                try:
+                    # First fetch the test case again to ensure we have the latest version
+                    tc_results = list(embeddings_generator.search_client.search(
+                        search_text="",
+                        filter=f"id eq '{updated_test_case['id']}'",
+                        select=["*"]
+                    ))
+                    
+                    if tc_results:
+                        # Start with the latest version but use our filtered criteria metadata
+                        current_tc = dict(tc_results[0])
+                        current_tc["criteriaMetadata"] = updated_test_case["criteriaMetadata"]
+                        
+                        # Recheck that removed criteria IDs are not present
+                        current_criteria_ids = [c.get("criteriaId") for c in current_tc.get("criteriaMetadata", [])]
+                        for removed_id in removed_criteria_ids:
+                            if removed_id in current_criteria_ids:
+                                print_error(f"⚠️ CRITICAL: Criteria {removed_id} is still present after preparing update!")
+                        
+                        # Perform the upload with the properly cleansed document
+                        success = embeddings_generator.upload_test_case(current_tc)
+                    else:
+                        # If we can't fetch the latest version, use our prepared update
+                        success = embeddings_generator.upload_test_case(updated_test_case)
+                    
+                    if success:
+                        updated_count += 1
+                        print_success(f"Updated test case {updated_test_case.get('id')} - completely removed all references to removed criteria")
+                        
+                        # Verify the update was successful
+                        verification_results = list(embeddings_generator.search_client.search(
+                            search_text="",
+                            filter=f"id eq '{updated_test_case['id']}'",
+                            select=["criteriaMetadata"]
+                        ))
+                        
+                        if verification_results:
+                            verification_criteria = verification_results[0].get("criteriaMetadata", [])
+                            verification_ids = [c.get("criteriaId") for c in verification_criteria]
+                            
+                            # Check if any removed criteria are still present
+                            remaining_removed = [rid for rid in removed_criteria_ids if rid in verification_ids]
+                            
+                            if remaining_removed:
+                                print_error(f"⚠️ VERIFICATION FAILED: Test case {updated_test_case['id']} still contains removed criteria: {', '.join(remaining_removed)}")
+                            else:
+                                print_success(f"✅ VERIFICATION PASSED: Test case {updated_test_case['id']} no longer contains any removed criteria")
+                    else:
+                        print_error(f"Failed to update test case {updated_test_case.get('id')}")
+                except Exception as e:
+                    print_error(f"Error updating test case {updated_test_case.get('id')}: {str(e)}")
+        
+        # Print summary
+        print_success(f"Processed {len(test_cases)} test cases:")
+        print_success(f"  - Deleted: {deleted_count} test cases with no remaining criteria")
+        print_success(f"  - Updated: {updated_count} test cases by completely removing all references to removed criteria")
+        
+        return True
         
     except Exception as e:
         print_error(f"Error handling removed criteria: {str(e)}")
         import traceback
         traceback.print_exc()
-        return False
-    
+        return False         
+
 async def handle_reactivated_criteria(feature_id, reactivated_criteria_ids, criteria_changes):
     """
     Specialized handler for reactivated criteria.
@@ -2099,3 +2184,370 @@ async def handle_reactivated_criteria(feature_id, reactivated_criteria_ids, crit
         import traceback
         traceback.print_exc()
         return False
+
+async def handle_determine_update_type(feature_data, original_feature):
+    """
+    Determine what kind of update is happening to a feature.
+    
+    Args:
+        feature_data (dict): New feature data from the feature file
+        original_feature (dict): Original feature data from the database
+        
+    Returns:
+        str: Update type ('NO_CHANGES', 'ADDED', 'MODIFIED', 'REMOVED', or 'COMBINED')
+        dict: Criteria changes analysis
+    """
+    # Analyze acceptance criteria changes
+    criteria_changes = await analyze_criteria_changes(
+        original_criteria=original_feature.get('acceptanceCriteria', []),
+        new_criteria_list=feature_data.get('acceptance_criteria', [])
+    )
+    
+    # Log the analysis results
+    print_progress(f"Acceptance criteria analysis complete:")
+    print_progress(f" - Unchanged: {len(criteria_changes['unchanged'])}")
+    print_progress(f" - Modified: {len(criteria_changes['modified'])}")
+    print_progress(f" - Added: {len(criteria_changes['added'])}")
+    print_progress(f" - Removed: {len(criteria_changes['removed'])}")
+    
+    # Determine update type based on criteria changes
+    has_modified = len(criteria_changes['modified']) > 0
+    has_added = len(criteria_changes['added']) > 0
+    has_removed = len(criteria_changes['removed']) > 0
+    
+    if not has_modified and not has_added and not has_removed:
+        return "NO_CHANGES", criteria_changes
+    elif has_modified and not has_added and not has_removed:
+        return "MODIFIED", criteria_changes
+    elif has_added and not has_modified and not has_removed:
+        return "ADDED", criteria_changes
+    elif has_removed and not has_modified and not has_added:
+        return "REMOVED", criteria_changes
+    else:
+        return "COMBINED", criteria_changes
+    
+async def handle_update_with_modified_criteria_flow(feature_data, original_feature, criteria_changes):
+    """
+    Handle feature update where criteria are modified.
+    
+    Args:
+        feature_data (dict): New feature data
+        original_feature (dict): Original feature data
+        criteria_changes (dict): Analysis of criteria changes
+        
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    feature_id = feature_data['id']
+    print_progress(f"Handling feature update with MODIFIED criteria for feature: {feature_id}")
+    
+    # Initialize components
+    feature_processor = FeatureProcessor()
+    
+    try:
+        # Repair relationships before making changes
+        print_progress(f"Repairing feature-test case relationship before update...")
+        repair_result = feature_processor.repair_feature_test_case_relationship(feature_id)
+        if repair_result["errors"] > 0:
+            print_warning(f"Some errors occurred during relationship repair, but continuing with update")
+        
+        # Create updated acceptance criteria objects
+        updated_criteria_objects = create_updated_criteria_objects(
+            original_criteria=original_feature.get('acceptanceCriteria', []),
+            criteria_changes=criteria_changes
+        )
+        
+        # Update the feature with new criteria
+        feature_update_success = feature_processor.update_feature_with_criteria(
+            feature_id=feature_id,
+            feature_data=feature_data,
+            updated_criteria=updated_criteria_objects,
+            preserve_test_cases=True
+        )
+
+        if not feature_update_success:
+            print_error(f"Failed to update feature with modified criteria")
+            return False
+        
+        # Handle modified criteria
+        print_progress(f"Processing {len(criteria_changes['modified'])} modified criteria...")
+        mod_success = await handle_modified_criteria(
+            feature_id=feature_id,
+            modified_criteria=criteria_changes['modified'],
+            criteria_map=get_criteria_id_map(updated_criteria_objects)
+        )
+        
+        # Verify and fix metadata consistency
+        print_progress(f"Verifying criteria status consistency...")
+        await verify_criteria_status_consistency(feature_id)
+        
+        # Final metadata verification
+        print_progress(f"Performing final metadata verification...")
+        final_fixes = await fix_test_case_metadata_issues(feature_id, fix_null_status=True)
+        if final_fixes > 0:
+            print_success(f"Fixed metadata issues in {final_fixes} test cases during final verification")
+        
+        print_success(f"Successfully processed modified criteria for feature: {feature_id}")
+        return mod_success
+        
+    except Exception as e:
+        print_error(f"Error handling modified criteria: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+    
+async def handle_update_with_added_criteria_flow(feature_data, original_feature, criteria_changes):
+    """
+    Handle feature update where new criteria are added.
+    
+    Args:
+        feature_data (dict): New feature data
+        original_feature (dict): Original feature data
+        criteria_changes (dict): Analysis of criteria changes
+        
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    feature_id = feature_data['id']
+    print_progress(f"Handling feature update with ADDED criteria for feature: {feature_id}")
+    
+    # Initialize components
+    feature_processor = FeatureProcessor()
+    
+    try:
+        # Repair relationships before making changes
+        print_progress(f"Repairing feature-test case relationship before update...")
+        repair_result = feature_processor.repair_feature_test_case_relationship(feature_id)
+        if repair_result["errors"] > 0:
+            print_warning(f"Some errors occurred during relationship repair, but continuing with update")
+        
+        # Create updated acceptance criteria objects
+        updated_criteria_objects = create_updated_criteria_objects(
+            original_criteria=original_feature.get('acceptanceCriteria', []),
+            criteria_changes=criteria_changes
+        )
+        
+        # Update the feature with new criteria
+        feature_update_success = feature_processor.update_feature_with_criteria(
+            feature_id=feature_id,
+            feature_data=feature_data,
+            updated_criteria=updated_criteria_objects,
+            preserve_test_cases=True
+        )
+
+        if not feature_update_success:
+            print_error(f"Failed to update feature with added criteria")
+            return False
+        
+        # Handle added criteria
+        print_progress(f"Processing {len(criteria_changes['added'])} added criteria...")
+        add_success = await handle_added_criteria(
+            feature_id=feature_id,
+            feature_data=feature_data,
+            added_criteria=criteria_changes['added'],
+            updated_criteria_objects=updated_criteria_objects
+        )
+        
+        # Verify and fix metadata consistency
+        print_progress(f"Verifying criteria status consistency...")
+        await verify_criteria_status_consistency(feature_id)
+        
+        # Final metadata verification
+        print_progress(f"Performing final metadata verification...")
+        final_fixes = await fix_test_case_metadata_issues(feature_id, fix_null_status=True)
+        if final_fixes > 0:
+            print_success(f"Fixed metadata issues in {final_fixes} test cases during final verification")
+        
+        print_success(f"Successfully processed added criteria for feature: {feature_id}")
+        return add_success
+        
+    except Exception as e:
+        print_error(f"Error handling added criteria: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+async def handle_update_with_removed_criteria_flow(feature_data, original_feature, criteria_changes):
+    """
+    Handle feature update where criteria are removed.
+    
+    Args:
+        feature_data (dict): New feature data
+        original_feature (dict): Original feature data
+        criteria_changes (dict): Analysis of criteria changes
+        
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    feature_id = feature_data['id']
+    print_progress(f"Handling feature update with REMOVED criteria for feature: {feature_id}")
+    
+    # Initialize components
+    feature_processor = FeatureProcessor()
+    
+    try:
+        # Repair relationships before making changes
+        print_progress(f"Repairing feature-test case relationship before update...")
+        repair_result = feature_processor.repair_feature_test_case_relationship(feature_id)
+        if repair_result["errors"] > 0:
+            print_warning(f"Some errors occurred during relationship repair, but continuing with update")
+        
+        # Create updated acceptance criteria objects
+        updated_criteria_objects = create_updated_criteria_objects(
+            original_criteria=original_feature.get('acceptanceCriteria', []),
+            criteria_changes=criteria_changes
+        )
+        
+        # Update the feature with new criteria
+        feature_update_success = feature_processor.update_feature_with_criteria(
+            feature_id=feature_id,
+            feature_data=feature_data,
+            updated_criteria=updated_criteria_objects,
+            preserve_test_cases=True
+        )
+
+        if not feature_update_success:
+            print_error(f"Failed to update feature with removed criteria")
+            return False
+        
+        # Handle removed criteria
+        print_progress(f"Processing {len(criteria_changes['removed'])} removed criteria...")
+        removed_criteria_ids = [c.get("id") for c in criteria_changes["removed"]]
+        rem_success = await handle_removed_criteria(
+            feature_id=feature_id,
+            removed_criteria_ids=removed_criteria_ids,
+            criteria_map=get_criteria_id_map(updated_criteria_objects)
+        )
+        
+        # Skip consistency check for removed criteria
+        print_progress("Skipping criteria status consistency check for removed criteria")
+        
+        # Final metadata verification
+        print_progress(f"Performing final metadata verification...")
+        final_fixes = await fix_test_case_metadata_issues(feature_id, fix_null_status=True)
+        if final_fixes > 0:
+            print_success(f"Fixed metadata issues in {final_fixes} test cases during final verification")
+        
+        print_success(f"Successfully processed removed criteria for feature: {feature_id}")
+        return rem_success
+        
+    except Exception as e:
+        print_error(f"Error handling removed criteria: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+async def handle_combined_update_flow(feature_data, original_feature, criteria_changes):
+    """
+    Handle feature update with multiple types of changes (added, modified, and/or removed).
+    
+    Args:
+        feature_data (dict): New feature data
+        original_feature (dict): Original feature data
+        criteria_changes (dict): Analysis of criteria changes
+        
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    feature_id = feature_data['id']
+    print_progress(f"Handling feature update with COMBINED changes for feature: {feature_id}")
+    
+    # Initialize components
+    feature_processor = FeatureProcessor()
+    skip_consistency_check = False
+    operations = []
+    overall_success = True
+    
+    try:
+        # Repair relationships before making changes
+        print_progress(f"Repairing feature-test case relationship before update...")
+        repair_result = feature_processor.repair_feature_test_case_relationship(feature_id)
+        if repair_result["errors"] > 0:
+            print_warning(f"Some errors occurred during relationship repair, but continuing with update")
+        
+        # Create updated acceptance criteria objects
+        updated_criteria_objects = create_updated_criteria_objects(
+            original_criteria=original_feature.get('acceptanceCriteria', []),
+            criteria_changes=criteria_changes
+        )
+        
+        # Update the feature with new criteria
+        feature_update_success = feature_processor.update_feature_with_criteria(
+            feature_id=feature_id,
+            feature_data=feature_data,
+            updated_criteria=updated_criteria_objects,
+            preserve_test_cases=True
+        )
+
+        if not feature_update_success:
+            print_error(f"Failed to update feature with combined changes")
+            return False
+        
+        # Handle each type of change
+        
+        # 1. Handle modified criteria
+        if criteria_changes['modified']:
+            print_progress(f"Processing {len(criteria_changes['modified'])} modified criteria...")
+            mod_success = await handle_modified_criteria(
+                feature_id=feature_id,
+                modified_criteria=criteria_changes['modified'],
+                criteria_map=get_criteria_id_map(updated_criteria_objects)
+            )
+            operations.append(f"Modified criteria: {'✅ Success' if mod_success else '❌ Failed'}")
+            overall_success = overall_success and mod_success
+        
+        # 2. Handle added criteria
+        if criteria_changes['added']:
+            print_progress(f"Processing {len(criteria_changes['added'])} added criteria...")
+            add_success = await handle_added_criteria(
+                feature_id=feature_id,
+                feature_data=feature_data,
+                added_criteria=criteria_changes['added'],
+                updated_criteria_objects=updated_criteria_objects
+            )
+            operations.append(f"Added criteria: {'✅ Success' if add_success else '❌ Failed'}")
+            overall_success = overall_success and add_success
+        
+        # 3. Handle removed criteria
+        if criteria_changes['removed']:
+            print_progress(f"Processing {len(criteria_changes['removed'])} removed criteria...")
+            removed_criteria_ids = [c.get("id") for c in criteria_changes["removed"]]
+            rem_success = await handle_removed_criteria(
+                feature_id=feature_id,
+                removed_criteria_ids=removed_criteria_ids,
+                criteria_map=get_criteria_id_map(updated_criteria_objects)
+            )
+            operations.append(f"Removed criteria: {'✅ Success' if rem_success else '❌ Failed'}")
+            overall_success = overall_success and rem_success
+            
+            # Skip consistency check for removed criteria
+            print_progress("Skipping criteria status consistency check for removed criteria")
+            skip_consistency_check = True
+        
+        # Verify and fix metadata consistency if not skipped
+        if not skip_consistency_check:
+            print_progress(f"Verifying criteria status consistency...")
+            await verify_criteria_status_consistency(feature_id)
+        else:
+            print_progress(f"Criteria status consistency check skipped for removed criteria")
+        
+        # Final metadata verification
+        print_progress(f"Performing final metadata verification...")
+        final_fixes = await fix_test_case_metadata_issues(feature_id, fix_null_status=True)
+        if final_fixes > 0:
+            print_success(f"Fixed metadata issues in {final_fixes} test cases during final verification")
+        
+        if operations:
+            print_success("Feature update summary:")
+            for op in operations:
+                print_progress(f"  - {op}")
+            
+        print_success(f"Feature update workflow completed successfully for {feature_id}")
+        return overall_success
+        
+    except Exception as e:
+        print_error(f"Error in combined update workflow: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+    

@@ -9,6 +9,7 @@ from test_case_creation.feature_management.feature_processor import FeatureProce
 from test_case_creation.helpers.json_parser import parse_test_cases_from_llm_output
 from test_case_creation.data_services.criteria_mapper import map_test_cases_to_criteria_with_embeddings
 from test_case_creation.helpers.common_utils import print_progress, print_success, print_warning, print_error
+from test_case_creation.data_services.criteria_mapper import map_test_cases_to_feature_criteria
 
 # Define constants for all path references
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -40,23 +41,46 @@ async def read_feature_requirement():
             print_error(f"Error: Feature requirement file not found at {feature_file}")
             return None
             
-        # Process the feature requirement - ADD THE AWAIT HERE
-        processed_feature = await feature_processor.process_and_store_feature_file(feature_file)
-        
-        if processed_feature:
-            print_success(f"Successfully processed feature: {processed_feature['id']}")
-            return processed_feature
-        else:
-            print_error("Failed to process feature requirement")
+        # First just read the feature data to determine its type
+        feature_data = feature_processor.read_feature_requirement(feature_file)
+        if not feature_data:
+            print_error(f"Failed to read feature requirement from {feature_file}")
             return None
             
+        # For NEW features, go ahead and process/store as before
+        if feature_data.get('type', '').upper() == 'NEW':
+            # Process and store new features
+            processed_feature = await feature_processor.process_and_store_feature_file(feature_file)
+            
+            if processed_feature:
+                print_success(f"Successfully processed feature: {processed_feature['id']}")
+                return processed_feature
+            else:
+                print_error("Failed to process feature requirement")
+                return None
+        else:
+            # For UPDATE or other types, just process without storing
+            try:
+                # Process the feature but don't store it yet
+                processed_feature = await feature_processor.process_feature(feature_data)
+                
+                if processed_feature:
+                    print_success(f"Successfully processed feature without storing: {processed_feature['id']}")
+                    return processed_feature
+                else:
+                    print_error("Failed to process feature")
+                    return None
+            except Exception as e:
+                print_error(f"Error processing feature: {str(e)}")
+                return None
+    
     except FileNotFoundError as e:
         print_error(f"Error: Feature requirement file not found - {e}")
         return None
     except Exception as e:
         print_error(f"Error processing feature requirement: {str(e)}")
         return None
-    
+     
 async def read_requirement():
     """Read the test case requirement from the prompt file."""
     try:
