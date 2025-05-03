@@ -126,58 +126,6 @@ async def create_test_cases(similar_cases):
     
     return test_cases_content
 
-def fallback_map_test_cases_to_criteria(parsed_test_cases, acceptance_criteria):
-    """
-    Fallback method to map test cases to criteria using keyword matching.
-    Updated to work with parsed test cases instead of text sections.
-    
-    Args:
-        parsed_test_cases (list): List of parsed test case dictionaries
-        acceptance_criteria (list): List of acceptance criteria
-        
-    Returns:
-        dict: Mapping of test case IDs to their criteria metadata
-    """
-    print_warning("Using fallback method for mapping test cases to criteria")
-    mapping = {}
-    
-    for test_case in parsed_test_cases:
-        test_case_id = test_case.get("id")
-        if not test_case_id:
-            continue
-            
-        # Combine all test case text for matching
-        test_case_content = (
-            test_case.get("title", "") + " " + 
-            test_case.get("steps", "") + " " + 
-            test_case.get("expectedResults", "")
-        ).lower()
-        
-        # Find matching criteria
-        criteria_matches = []
-        for i, criteria in enumerate(acceptance_criteria):
-            criteria_text = criteria.lower()
-            
-            # Extract key terms from criteria (words with 4+ characters)
-            key_terms = [word for word in criteria_text.split() if len(word) >= 4]
-            
-            # Count how many key terms match
-            matching_terms = sum(1 for term in key_terms if term in test_case_content)
-            
-            # If more than 30% of key terms match, consider it related
-            if matching_terms > 0 and (matching_terms / max(len(key_terms), 1) >= 0.3):
-                criteria_matches.append({
-                    "criteriaId": f"AC-{i+1:03d}",
-                    "description": criteria,
-                    "status": "Active"  # Explicitly set status to Active
-                })
-        
-        if criteria_matches:
-            mapping[test_case_id] = criteria_matches
-    
-    print_success(f"Fallback mapping created {len(mapping)} mappings")
-    return mapping
-
 async def process_and_store_test_cases(test_cases_content, feature_data=None):
     """Process the generated test cases and store them in the database."""
     print_progress("Processing and uploading test cases...")

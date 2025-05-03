@@ -2,26 +2,6 @@ import json
 from datetime import datetime, timezone
 import re
 
-def update_generator_prompt(original_prompt):
-    """
-    Enhance the generator prompt to request JSON output without hardcoding structure.
-    
-    Args:
-        original_prompt (str): The original generator prompt
-        
-    Returns:
-        str: Enhanced prompt requesting JSON format
-    """
-    # Add JSON instruction to the existing prompt without changing its essence
-    json_instruction = """
-Please provide your response in JSON format for easier processing.
-Each test case should be a JSON object with at least id, title, steps, and expectedResults fields.
-Include all test cases in a JSON array.
-"""
-    
-    # Combine with original prompt while preserving its content
-    enhanced_prompt = original_prompt + "\n\n" + json_instruction
-    return enhanced_prompt
 
 def extract_json_from_text(text):
     """
@@ -108,7 +88,6 @@ def parse_test_cases_from_llm_output(llm_output):
     except json.JSONDecodeError as e:
         print(f"JSON parsing failed: {e}")
         return []
-
 
 def format_steps(steps):
     """Format steps consistently regardless of input format."""
@@ -197,26 +176,6 @@ def parse_test_cases_from_text(text):
     
     return processed_cases
 
-# Example usage in the main workflow
-def enhance_test_case_generation(feature_data):
-    """
-    Enhance test case generation to use JSON format.
-    
-    Args:
-        feature_data (dict): Feature data
-        
-    Returns:
-        str: Enhanced prompt for test case generation
-    """
-    # Read the original prompt
-    import os
-    PROMPTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../..", "prompts"))
-    generator_prompt_file = os.path.join(PROMPTS_DIR, "generator_prompt.txt")
-    
-    with open(generator_prompt_file, "r", encoding="utf-8") as f:
-        original_prompt = f.read()
-    
-    # Enhance the prompt to request JSON
-    enhanced_prompt = update_generator_prompt(original_prompt)
-    
-    return enhanced_prompt
+
+
+   
