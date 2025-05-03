@@ -5,7 +5,7 @@ from different response formats.
 """
 
 import re
-from utils import extract_code_blocks
+from playwright_generation.common.utils import extract_code_blocks
 
 def extract_page_objects_from_coordinator(chat_history):
     """

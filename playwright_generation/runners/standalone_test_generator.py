@@ -11,10 +11,9 @@ import asyncio
 from dotenv import load_dotenv
 from browser_use import Browser, BrowserConfig, Agent
 from langchain_openai import AzureChatOpenAI
-from vector_retrieval import fetch_test_case_by_id
-from agent_config import create_agents
-from orchestrator.agent_orchestrator import PlaywrightAgentOrchestrator
-from testcase_utils import extract_test_case_from_selectors
+from playwright_generation.common.vector_retrieval import fetch_test_case_by_id
+from playwright_generation.orchestration.agent_orchestrator import PlaywrightAgentOrchestrator
+from playwright_generation.generators.testcase_utils import extract_test_case_from_selectors
 
 async def generate_test(test_case_id: str, output_dir: str = "playwright_tests", use_design_first: bool = True):
     """

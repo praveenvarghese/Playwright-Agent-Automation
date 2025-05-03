@@ -7,13 +7,13 @@ import os
 import json
 import re
 import asyncio
-from agent_config import create_agents
-from pom_generation import save_page_objects, analyze_selectors
-from utils import save_file
-from orchestrator.extraction_utils import extract_page_objects_from_coordinator, extract_test_script_from_chat
-from orchestrator.agent_specialized import generate_with_specialized_agents
-from validation import run_integration_validation
-from critique_feedback import apply_critique_improvements
+from playwright_generation.agents.agent_config import create_agents
+from playwright_generation.generators.pom_generation import save_page_objects, analyze_selectors
+from playwright_generation.common.utils import save_file, extract_code_blocks
+from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_coordinator, extract_test_script_from_chat
+from playwright_generation.orchestration.agent_specialized import generate_with_specialized_agents
+from playwright_generation.generators.validation import run_integration_validation
+from playwright_generation.agents.critique_feedback import apply_critique_improvements
 
 class PlaywrightAgentOrchestrator:
     """Orchestrates the agent-based generation of enhanced Playwright tests."""
@@ -228,7 +228,6 @@ Focus on addressing the key issues raised by the reviewer.
             )
             
             # Extract improved page objects and test script
-            from utils import extract_code_blocks
             improved_objects = extract_code_blocks(improvement_result, "javascript")
             if improved_objects and len(improved_objects) >= 2:
                 # If we can identify clear improvements, use them
@@ -334,7 +333,6 @@ Focus on addressing the key issues raised by the reviewer.
             )
             
             # Extract improved test script
-            from utils import extract_code_blocks
             improved_scripts = extract_code_blocks(improvement_result, "javascript")
             if improved_scripts and len(improved_scripts) > 0:
                 # If we can identify clear improvements, use the last script

@@ -1,6 +1,6 @@
 import json
 import os
-from orchestrator.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized
+from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized
 
 async def generate_with_specialized_agents(agents, test_case_id, test_case, selectors, 
                                           save_callback, pages_dir, tests_dir):

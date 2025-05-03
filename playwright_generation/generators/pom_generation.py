@@ -4,7 +4,7 @@ Page Object Model generation functions for AI-enhanced Playwright test generatio
 
 import os
 import re
-from utils import extract_code_blocks, extract_class_name, save_file
+from playwright_generation.common.utils import extract_code_blocks, extract_class_name, save_file
 
 def extract_page_objects(chat_history):
     """

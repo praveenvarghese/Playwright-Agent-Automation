@@ -4,7 +4,7 @@ Test script enhancement functions for AI-enhanced Playwright test generation.
 
 import os
 import re
-from utils import extract_code_blocks, save_file
+from playwright_generation.common.utils import extract_code_blocks, save_file
 
 def extract_enhanced_script(chat_history):
     """
