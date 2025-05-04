@@ -6,7 +6,8 @@ This module defines the specialized system prompts for each agent.
 import os
 
 # Define the prompt directory path
-PROMPT_DIR = os.path.join(os.path.dirname(__file__), "playwright-prompts")
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROMPT_DIR = os.path.join(base_dir, "prompts")
 
 def load_prompt(filename):
     """Load prompt from file."""

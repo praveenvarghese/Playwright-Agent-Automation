@@ -15,6 +15,9 @@ from playwright_generation.common.vector_retrieval import fetch_test_case_by_id
 from playwright_generation.orchestration.agent_orchestrator import PlaywrightAgentOrchestrator
 from playwright_generation.generators.testcase_utils import extract_test_case_from_selectors
 from playwright_generation.common.utils import load_prompt_template
+from playwright_generation.browser_helpers.action_detector import detect_action_type
+from playwright_generation.browser_helpers.file_handlers import save_selectors
+from playwright_generation.browser_helpers.selector_extractor import extract_selectors_from_browser_result
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 async def generate_test(test_case_id: str, output_dir: str = "playwright_tests", use_design_first: bool = True):
@@ -143,82 +146,36 @@ async def run_browser_automation(test_case_id: str, test_case: dict):
         traceback.print_exc()
         return None
     
-def extract_selectors(result, test_case_id):
+def extract_selectors(result, test_case_id, output_dir=None):
     """
     Extract selectors from browser automation result.
-    Based on the original extraction function from integrated_test_generator.py.
     
     Args:
         result (dict): Browser automation result
         test_case_id (str): Test case ID
+        output_dir (str, optional): Output directory for selector files
         
     Returns:
         list: Extracted selectors
     """
-    seen = set()
-    selector_list = []
-    selector_text = "# CSS selectors detected by browser_use\n\n"
-
-    # Process history items
-    history_items = result.get("history", []) if isinstance(result, dict) else []
-    print(f"Number of history items: {len(history_items)}")
+    try:
+        # Extract selectors using the helper
+        selector_list = extract_selectors_from_browser_result(result)
+        
+        # Log what was found
+        print(f"✅ Extracted {len(selector_list)} selectors with actions")
+        
+        # Save the selectors to files
+        file_paths = save_selectors(selector_list, test_case_id, output_dir)
+        
+        return selector_list
+        
+    except Exception as e:
+        print(f"❌ Error extracting selectors: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return []
     
-    for i, history_item in enumerate(history_items):
-        print(f"Processing history item {i+1}/{len(history_items)}")
-        
-        actions = history_item.get("result", []) if isinstance(history_item, dict) else []
-        elements = history_item.get("state", {}).get("interacted_element", []) if isinstance(history_item, dict) else []
-        
-        for j, (action, element) in enumerate(zip(actions, elements)):
-            try:
-                if not element or not isinstance(element, dict) or "css_selector" not in element:
-                    print(f"  Skipping item {j+1} - no valid element or selector")
-                    continue
-
-                selector = element["css_selector"]
-                if selector in seen:
-                    print(f"  Skipping duplicate selector: {selector[:30]}...")
-                    continue
-                seen.add(selector)
-
-                tag = element.get("tag_name", "unknown")
-                
-                # Safely handle extracted_content
-                extracted_content = action.get("extracted_content") if isinstance(action, dict) else None
-                content = "" if extracted_content is None else str(extracted_content).lower()
-
-                # Determine action type
-                action_type = "unknown"
-                if "click" in content:
-                    action_type = "click"
-                elif "input" in content:
-                    action_type = "input"
-                elif "scroll" in content:
-                    action_type = "scroll"
-                
-                print(f"  Found {action_type} action on {tag} element")
-
-                selector_list.append({
-                    "action": action_type,
-                    "tag": tag,
-                    "text": content,
-                    "selector": selector
-                })
-
-                selector_text += f"Action: {action_type}\nElement: {tag}\nText: {content}\nSelector: {selector}\n\n"
-            except Exception as e:
-                print(f"  Error processing action/element {j+1}: {str(e)}")
-                continue
-
-    # Save the selectors to files
-    with open(f"{test_case_id}_selectors.json", "w", encoding="utf-8") as f:
-        json.dump(selector_list, f, indent=2)
-    with open(f"{test_case_id}_selectors.txt", "w", encoding="utf-8") as f:
-        f.write(selector_text)
-
-    print(f"✅ Extracted {len(selector_list)} selectors with actions")
-    return selector_list
-
 async def generate_playwright_tests(test_case_id, test_case, selectors, output_dir, use_design_first):
     """
     Generate Playwright tests with Page Object Models using the orchestrator.
