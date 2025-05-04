@@ -143,3 +143,20 @@ def create_logger(log_dir="logs"):
             f.write(log_message + "\n")
     
     return log
+
+def load_prompt_template(template_path, **kwargs):
+    """
+    Load a prompt template from a file and format it with variables.
+    
+    Args:
+        template_path (str): Path to the template file
+        **kwargs: Variables to use in formatting
+        
+    Returns:
+        str: Formatted prompt
+    """
+    with open(template_path, 'r', encoding='utf-8') as file:
+        template = file.read()
+    
+    # Format the template with provided variables
+    return template.format(**kwargs)

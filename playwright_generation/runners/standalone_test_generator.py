@@ -14,6 +14,8 @@ from langchain_openai import AzureChatOpenAI
 from playwright_generation.common.vector_retrieval import fetch_test_case_by_id
 from playwright_generation.orchestration.agent_orchestrator import PlaywrightAgentOrchestrator
 from playwright_generation.generators.testcase_utils import extract_test_case_from_selectors
+from playwright_generation.common.utils import load_prompt_template
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 async def generate_test(test_case_id: str, output_dir: str = "playwright_tests", use_design_first: bool = True):
     """
@@ -88,6 +90,22 @@ async def run_browser_automation(test_case_id: str, test_case: dict):
         password = os.getenv("APP_PASSWORD")
         headless = os.getenv("APP_HEADLESS", "true").lower() in ["true", "1", "yes"]
         
+        # Load prompt template from file
+        template_path = os.path.join(base_dir, "prompts", "browser_prompt_template.txt")
+        
+        # Format variables for the template
+        template_vars = {
+            "app_url": app_url,
+            "username": username,
+            "password": password,
+            "test_case_title": test_case.get('title', ''),
+            "test_case_steps": test_case.get('steps', ''),
+            "test_case_expected_results": test_case.get('expectedResults', '')
+        }
+        
+        # Load and format the prompt template
+        task_prompt = load_prompt_template(template_path, **template_vars)
+        
         # Initialize LLM and Browser
         llm = AzureChatOpenAI(
             openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
@@ -97,31 +115,9 @@ async def run_browser_automation(test_case_id: str, test_case: dict):
         )
         browser = Browser(config=BrowserConfig(headless=headless))
         
-        # Create the Agent with the task
+        # Create the Agent with the formatted task prompt
         ui_agent = Agent(
-            task=f"""
-            You are a Playwright automation engineer using browser_use.
-
-            Your task:
-            1. Go to "{app_url}" and log in using:
-               - Username: {username}
-               - Password: {password}
-
-            2. Perform this test case exactly:
-            Title: {test_case['title']}
-            Steps:
-            {test_case['steps']}
-
-            Expected Results:
-            {test_case['expectedResults']}
-
-            For each element you interact with, determine the most optimal selector:
-            - Prefer ID-based selectors when available (#id)
-            - Use attribute combinations for form elements (input[name="x"][type="y"])
-            - Use distinctive class names for other elements (button.distinctive-class)
-
-            Log each interaction clearly so the system can extract selectors later.
-            """,
+            task=task_prompt,
             browser=browser,
             llm=llm
         )
@@ -146,7 +142,7 @@ async def run_browser_automation(test_case_id: str, test_case: dict):
         import traceback
         traceback.print_exc()
         return None
-
+    
 def extract_selectors(result, test_case_id):
     """
     Extract selectors from browser automation result.
