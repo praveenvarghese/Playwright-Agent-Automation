@@ -1,0 +1,11 @@
+Feature: Password Reset
+
+Requirement:
+Users must be able to reset their password using a verified email address.
+
+Acceptance Criteria:
+1. The “Forgot Password” link is visible on the login screen.
+2. Users receive a password reset email after submitting a valid email.
+3. The reset link must expire after 1 hour.
+4. An error message is shown for unregistered emails.
+5. Password reset form enforces strong password rules.
