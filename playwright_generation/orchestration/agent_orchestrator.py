@@ -9,7 +9,7 @@ import re
 import asyncio
 from playwright_generation.agents.agent_config import create_agents
 from playwright_generation.generators.pom_generation import save_page_objects, analyze_selectors
-from playwright_generation.common.utils import save_file, extract_code_blocks
+from playwright_generation.common.utils import save_file, extract_code_blocks, load_prompt_template
 from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_coordinator, extract_test_script_from_chat
 from playwright_generation.orchestration.agent_specialized import generate_with_specialized_agents
 from playwright_generation.generators.validation import run_integration_validation
@@ -507,7 +507,7 @@ Your output should include:
         
         return result
     
-    def generate_with_design_first(self, test_case_id, test_case, selectors):
+    async def generate_with_design_first(self, test_case_id, test_case, selectors):
         """
         Generate Page Object Models using a design-first approach with critique.
         
@@ -556,29 +556,23 @@ Your output should include:
         # Prepare selectors data for the prompt
         selectors_json = json.dumps(selectors, indent=2)
         
-        # Create design prompt
-        design_prompt = f"""
-        Create a high-level design for Playwright Page Objects and test script based on these selectors and test case.
+        # Load prompt from template file
+        template_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+            "prompts", 
+            "design_prompt.txt"
+        )
         
-        Test Case ID: {test_case_id}
-        Test Case Title: {test_case.get('title', '')}
-        Test Steps: {test_case.get('steps', '')}
-        Expected Results: {test_case.get('expectedResults', '')}
+        # Load and format the template
         
-        Selectors:
-        ```json
-        {selectors_json}
-        ```
-        
-        Your design should include:
-        1. File structure (what page objects will be created)
-        2. Dependencies between files (how they will reference each other)
-        3. Selector strategy (how selectors will be organized and referenced)
-        4. Error handling approach (where and how errors will be handled)
-        5. Return patterns (how methods will return values or page objects)
-        
-        Do NOT include actual implementation code, just the high-level architecture and decisions.
-        """
+        design_prompt = load_prompt_template(
+            template_path,
+            test_case_id=test_case_id,
+            test_case_title=test_case.get('title', ''),
+            test_case_steps=test_case.get('steps', ''),
+            test_case_expected_results=test_case.get('expectedResults', ''),
+            selectors_json=selectors_json
+        )
         
         # Generate the design
         design_result = user_proxy.initiate_chat(
@@ -596,23 +590,20 @@ Your output should include:
         user_proxy = self.agents["user_proxy"]
         critic = self.agents.get("integration_critic", self.agents["coordinator"])
         
-        # Create critique prompt
-        critique_prompt = f"""
-        Review this high-level design for Playwright Page Objects and identify potential integration issues.
+        # Load prompt from template file
+        template_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+            "prompts", 
+            "critique_design_prompt.txt"
+        )
         
-        Design:
-        {design}
+        # Load and format the template
         
-        Focus on these specific areas:
-        1. Circular dependencies between files
-        2. Inconsistent selector strategies
-        3. Redundant error handling
-        4. Inconsistent return patterns
-        5. Poor separation of concerns
-        6. Module system - ensure proper ES6 module usage without default exports
         
-        Provide specific recommendations for improving each identified issue.
-        """
+        critique_prompt = load_prompt_template(
+            template_path,
+            design=design
+        )
         
         # Generate the critique
         critique_result = user_proxy.initiate_chat(
@@ -624,7 +615,7 @@ Your output should include:
         # Extract the critique from the response
         critique = critique_result.chat_history[-1]["content"]
         return critique
-    
+
     def _generate_implementation(self, design, critique, test_case_id, selectors):
         """Generate the actual implementation based on the design and critique."""
         user_proxy = self.agents["user_proxy"]
@@ -633,63 +624,23 @@ Your output should include:
         # Prepare selectors data for the prompt
         selectors_json = json.dumps(selectors, indent=2)
         
-        # Create implementation prompt
-        implementation_prompt = f"""
-        Generate a complete implementation of Playwright Page Objects and test script based on this design and critique feedback.
+        # Load prompt from template file
+        template_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+            "prompts", 
+            "implementation_prompt.txt"
+        )
         
-        Design:
-        {design}
+        # Load and format the template
         
-        Critique and Recommendations:
-        {critique}
         
-        Test Case ID: {test_case_id}
-        
-        Selectors:
-        ```json
-        {selectors_json}
-        ```
-        
-        Implement:
-        1. A BasePage.js file with common functionality
-        2. All necessary Page Object files following the design
-        3. A test script that uses these Page Objects
-        
-        IMPORTANT REQUIREMENTS:
-
-        1. SELECTOR USAGE:
-        - Use the original selectors from the JSON but simplify them where possible
-        - For username input, prefer: 'input#username' or similar simple selector
-        - For password input, prefer: 'input#password' or similar simple selector
-        - For login button, use the class from original but simplify
-        - For other buttons and inputs, extract distinctive IDs or classes from the originals
-        
-       2. USE ES6 MODULE FORMAT CORRECTLY:
-        - Dont Generate Default exports
-        - Use exports for page classes:
-            export class BasePage {{ 
-            // methods
-            }}
-        
-        Format your response with clearly separated code blocks for each file using this exact format:
-        
-        ### BasePage.js
-        ```javascript
-        // Complete BasePage implementation using ES6 modules
-        ```
-        
-        ### LoginPage.js
-        ```javascript
-        // Complete LoginPage implementation using ES6 modules
-        ```
-        
-        ### testCase.spec.js
-        ```javascript
-        // Complete test script implementation using ES6 modules
-        ```
-        
-        Each file should be complete and ready to use without modification.
-        """
+        implementation_prompt = load_prompt_template(
+            template_path,
+            design=design,
+            critique=critique,
+            test_case_id=test_case_id,
+            selectors_json=selectors_json
+        )
         
         # Generate the implementation
         implementation_result = user_proxy.initiate_chat(
@@ -701,6 +652,7 @@ Your output should include:
         # Extract page objects and test script from the response
         response = implementation_result.chat_history[-1]["content"]
 
+        # Save debug output
         with open(f"debug_{test_case_id}_implementation.txt", "w", encoding="utf-8") as f:
             f.write(response)
         print(f"Debug: Saved response to debug_{test_case_id}_implementation.txt")

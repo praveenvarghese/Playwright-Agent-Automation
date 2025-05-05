@@ -1,0 +1,14 @@
+Review this high-level design for Playwright Page Objects and identify potential integration issues.
+
+Design:
+{design}
+
+Focus on these specific areas:
+1. Circular dependencies between files
+2. Inconsistent selector strategies
+3. Redundant error handling
+4. Inconsistent return patterns
+5. Poor separation of concerns
+6. Module system - ensure proper ES6 module usage without default exports
+
+Provide specific recommendations for improving each identified issue.

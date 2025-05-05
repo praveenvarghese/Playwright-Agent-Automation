@@ -197,7 +197,7 @@ async def generate_playwright_tests(test_case_id, test_case, selectors, output_d
         # Use the design-first approach or original approach based on parameter
         if use_design_first:
             print("Using design-first approach for Playwright generation")
-            success = orchestrator.generate_with_design_first(test_case_id, test_case, selectors)
+            success = await orchestrator.generate_with_design_first(test_case_id, test_case, selectors)
         else:
             print("Using original approach for Playwright generation")
             success = await orchestrator.generate_from_selectors(test_case_id, test_case, selectors)
