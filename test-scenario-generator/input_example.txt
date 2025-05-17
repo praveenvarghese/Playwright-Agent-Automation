@@ -1,11 +1,21 @@
-Feature: Password Reset
+Feature: App-developer controlled WebUI Menu - Acceptance Criteria
 
 Requirement:
-Users must be able to reset their password using a verified email address.
+Necessary to give the App developer control over which pages appear in the menu bar
 
 Acceptance Criteria:
-1. The “Forgot Password” link is visible on the login screen.
-2. Users receive a password reset email after submitting a valid email.
-3. The reset link must expire after 1 hour.
-4. An error message is shown for unregistered emails.
-5. Password reset form enforces strong password rules.
+1. The WebUI menu contents can be defined through a model specification in the Application Settings.
+2. When the option is not set, the menu bar follows the default behavior of including all pages from both MainProject and libraries.
+3. The menu can be completely hidden by using an identifier with no data.
+4. Each menu item in the specification includes:
+   - Name field for the display text
+   - Page URI field that links to an actual page
+   - Parent Page URI field for creating nested menu structures
+   - Tooltip field for providing additional context on hover
+   - State field (Active, Inactive, or Hidden) to control display
+5. Menu links only appear if the Page URI resolves to a valid page.
+6. Invalid Page URI entries result in the corresponding link not being shown.
+7. Menu items can be organized hierarchically using Parent Page URI, similar to the Workflow feature.
+8. Menu items respect the state settings (Active, Inactive, Hidden) to determine visibility.
+9. The menu structure supports items from both MainProject and library pages.
+10. The approach to hiding the menu is more efficient than using CSS.

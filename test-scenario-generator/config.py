@@ -13,6 +13,9 @@ azure_base_url = os.getenv("AZURE_OPENAI_ENDPOINT")
 azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION")
 azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 
+# Add embedding model deployment name
+azure_embedding_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
+
 # Define the common config list that can be reused
 config_list = [
     {

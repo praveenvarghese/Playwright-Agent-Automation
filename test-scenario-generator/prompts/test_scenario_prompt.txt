@@ -1,3 +1,20 @@
-From the requirement and acceptance criteria below, generate a list of high-level test scenarios. Each scenario should be 1–2 sentences describing what needs to be tested.
+From the requirement and acceptance criteria below, generate a comprehensive list of high-level test scenarios. Each scenario should be 1–2 sentences describing what needs to be tested.
 
+Consider the following application context when creating test scenarios:
+{application_context}
+
+Requirement:
 {requirement_text}
+
+Important Guidelines:
+1. Create specific test scenarios covering each acceptance criterion
+2. Include scenarios for potential impacts on existing features like Page Manager and Application Manager
+3. Consider integration points with WebUI classic pages and WebUI grid pages
+4. Include regression tests for features that might be affected by menu changes
+5. Provide concrete examples using application-specific terminology 
+6. Consider both positive and negative test cases
+7. Format the output as a numbered list with clear headers and proper indentation
+8. Focus on potential conflicts with existing page tree structure
+9. Include scenarios related to the visibility settings for pages and widgets
+
+The test scenarios should not only verify the new functionality meets requirements but also ensure it doesn't negatively impact existing features.
