@@ -93,7 +93,7 @@ async def main():
         # Step 4: Generate new test cases
         test_cases_content = await create_test_cases(similar_cases)
         
-        # Step 5: Process and store the test cases with feature relation
+        # Step 5: Process and store the test cases with feature relation.
         if test_cases_content:
             await process_and_store_test_cases(test_cases_content, feature_data)
         else:
