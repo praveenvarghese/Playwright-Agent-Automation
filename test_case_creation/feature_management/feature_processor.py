@@ -46,8 +46,8 @@ class FeatureProcessor:
         # Check Azure Search config
         if not self.search_endpoint:
             missing_vars.append("AZURE_SEARCH_ENDPOINT")
-        if not self.search_key:
-            missing_vars.append("AZURE_SEARCH_KEY")
+        # if not self.search_key:
+        #     missing_vars.append("AZURE_SEARCH_KEY")
             
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
