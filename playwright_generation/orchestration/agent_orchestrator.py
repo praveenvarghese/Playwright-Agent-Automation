@@ -1,6 +1,6 @@
 """
 Agent orchestrator for AI-enhanced Playwright test generation.
-This module orchestrates the conversation flow between Autogen agents.
+This module orchestrates the LangChain/LangGraph-based generation flow.
 """
 
 import os
@@ -16,12 +16,12 @@ from playwright_generation.generators.validation import run_integration_validati
 from playwright_generation.agents.critique_feedback import apply_critique_improvements
 
 class PlaywrightAgentOrchestrator:
-    """Orchestrates the agent-based generation of enhanced Playwright tests."""
+    """Orchestrates the LangChain/LangGraph-based generation of enhanced Playwright tests."""
     
     def __init__(self, output_dir="playwright_tests"):
         """Initialize the orchestrator with output directory."""
         self.output_dir = output_dir
-        self.agents = create_agents()
+        self.agents = create_agents()  # LangChain agents
         
         # Create output directories
         self.pages_dir = os.path.join(output_dir, "pages")
@@ -64,31 +64,24 @@ class PlaywrightAgentOrchestrator:
             print("⚠️ Integration validation failed - skipping feedback loop")
 
     async def generate_from_selectors(self, test_case_id, test_case, selectors):
-        """
-        Generate Page Object Models directly from selectors.
+        """Generate Page Object Models directly from selectors using LangGraph workflow."""
         
-        Args:
-            test_case_id (str): The test case ID
-            test_case (dict): The test case data
-            selectors (list): List of selector data
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        # Use specialized agents approach if available
-        if "pom_generator" in self.agents and "pom_critic" in self.agents:
-            return await generate_with_specialized_agents(
-                self.agents, test_case_id, test_case, selectors, 
-                lambda tc_id, page_objects, test_script: self._save_results(tc_id, page_objects, test_script),
-                self.pages_dir, self.tests_dir
-            )
+        # Force using the new workflow with updated agents
+        from playwright_generation.orchestration.agent_specialized import generate_with_specialized_agents
         
-        # Otherwise, fall back to original approach
-        return await self._generate_from_selectors_original(test_case_id, test_case, selectors)
+        return await generate_with_specialized_agents(
+            None,  # Don't pass agents, let it create its own
+            test_case_id, 
+            test_case, 
+            selectors, 
+            lambda tc_id, page_objects, test_script: self._save_results(tc_id, page_objects, test_script),
+            self.pages_dir, 
+            self.tests_dir
+        )
     
     async def enhance_test(self, test_case_id, original_script, selectors_data):
         """
-        Enhance a Playwright test using AI agents.
+        Enhance a Playwright test using LangChain agents.
         
         Args:
             test_case_id (str): The test case ID
@@ -129,7 +122,7 @@ class PlaywrightAgentOrchestrator:
     
     async def _transform_to_pom(self, test_case_id, original_script, selectors_data):
         """
-        Transform original script to Page Object Model using AI agents.
+        Transform original script to Page Object Model using LangChain agents.
         
         Args:
             test_case_id (str): The test case ID
@@ -139,14 +132,10 @@ class PlaywrightAgentOrchestrator:
         Returns:
             dict: Dictionary with page objects and test script
         """
-        user_proxy = self.agents["user_proxy"]
-        coordinator = self.agents["coordinator"]
-        pom_reviewer = self.agents["pom_reviewer"]
-        
         # Prepare selectors data for agents
         selectors_json = json.dumps(selectors_data, indent=2)
         
-        # Initiate the conversation
+        # Create prompt for POM transformation
         prompt = f"""
 Please transform this Playwright test script into a well-structured Page Object Model.
 
@@ -167,29 +156,32 @@ Test Case ID: {test_case_id}
 3. Create a BasePage class for common functionality
 4. Rewrite the test to use the Page Object Model pattern
 5. Ensure the implementation follows best practices for maintainability
+
+Format your response with clear file headers:
+### BasePage.js
+```javascript
+// BasePage implementation
+```
+
+### LoginPage.js
+```javascript
+// LoginPage implementation
+```
+
+### testCase.spec.js
+```javascript
+// Test script using Page Objects
+```
 """
         
-        # Start the multi-agent conversation with the coordinator
-        chat_result = await user_proxy.initiate_chat(
-            coordinator,
-            message=prompt,
-            max_turns=6,
-            summary_method="reflection_with_llm"
-        )
+        # Use LangChain POM generator directly
+        response = self.agents["pom_generator"](prompt)
         
-        # Extract conversation history
-        conversation = []
-        for message in chat_result.chat_history:
-            conversation.append({
-                "role": message["role"],
-                "content": message["content"]
-            })
-        
-        # Have the POM Reviewer critique the results
+        # Get review from POM reviewer
         review_prompt = f"""
 Review this Page Object Model implementation for the test case {test_case_id}.
 
-{chat_result.summary}
+{response}
 
 Please provide a detailed critique focusing on:
 1. Structure and organization
@@ -200,62 +192,62 @@ Please provide a detailed critique focusing on:
 Be specific and provide examples for suggested improvements.
 """
         
-        # Send the implementation to the reviewer
-        review_result = await user_proxy.initiate_chat(
-            pom_reviewer,
-            message=review_prompt,
-            max_turns=2
-        )
+        review = self.agents["pom_reviewer"](review_prompt)
         
-        # Extract page objects and test script from the conversation
-        page_objects = extract_page_objects_from_coordinator(chat_result.chat_history)
-        test_script = extract_test_script_from_chat(chat_result.chat_history)
-        
-        # Incorporate review feedback (if substantial improvements suggested)
-        if "improvements suggested" in review_result.summary.lower():
-            # Send back to coordinator with reviewer feedback
+        # If substantial improvements suggested, get improved version
+        if "improvements suggested" in review.lower() or "improve" in review.lower():
             improvement_prompt = f"""
 The POM Reviewer has provided feedback on the implementation:
 
-{review_result.summary}
+{review}
 
 Please improve the Page Object Model implementation based on this feedback.
 Focus on addressing the key issues raised by the reviewer.
+
+Original implementation:
+{response}
+
+Provide the improved implementation with the same format:
+### BasePage.js
+```javascript
+// Improved BasePage implementation
+```
+
+### LoginPage.js
+```javascript
+// Improved LoginPage implementation  
+```
+
+### testCase.spec.js
+```javascript
+// Improved test script
+```
 """
             
-            improvement_result = coordinator.generate_reply(
-                messages=[{"role": "user", "content": improvement_prompt}]
-            )
-            
-            # Extract improved page objects and test script
-            improved_objects = extract_code_blocks(improvement_result, "javascript")
-            if improved_objects and len(improved_objects) >= 2:
-                # If we can identify clear improvements, use them
-                page_objects = improved_objects[:-1]  # All but last are page objects
-                test_script = improved_objects[-1]    # Last one is test script
+            response = self.agents["pom_generator"](improvement_prompt)
+        
+        # Extract page objects and test script
+        page_objects = extract_page_objects_from_coordinator([{"role": "assistant", "content": response}])
+        test_script = extract_test_script_from_chat([{"role": "assistant", "content": response}])
         
         return {
             "page_objects": page_objects,
             "test_script": test_script,
-            "conversation": conversation
+            "response": response
         }
     
     async def _enhance_test_script(self, test_case_id, test_script):
         """
-        Enhance the test script with improved assertions and reliability.
+        Enhance the test script with improved assertions and reliability using LangChain agents.
         
         Args:
             test_case_id (str): The test case ID
             test_script (str): The test script to enhance
             
         Returns:
-            dict: Dictionary with enhanced script and conversation
+            dict: Dictionary with enhanced script
         """
-        user_proxy = self.agents["user_proxy"]
-        coordinator = self.agents["coordinator"]
-        script_reviewer = self.agents["script_reviewer"]
-        
-        # Initiate the conversation
+        # Create enhancement prompt
         prompt = f"""
 Please enhance this Playwright test script with better assertions, wait strategies, and error handling.
 
@@ -272,32 +264,18 @@ Focus on:
 3. Improving error handling
 4. Enhancing documentation
 5. Following test automation best practices
+
+Provide the enhanced test script in the same format.
 """
         
-        # Start the multi-agent conversation with coordinator
-        chat_result = await user_proxy.initiate_chat(
-            coordinator,
-            message=prompt,
-            max_turns=4,
-            summary_method="reflection_with_llm"
-        )
+        # Use LangChain script engineer
+        enhanced_response = self.agents["script_engineer"](prompt)
         
-        # Extract conversation history
-        conversation = []
-        for message in chat_result.chat_history:
-            conversation.append({
-                "role": message["role"],
-                "content": message["content"]
-            })
-        
-        # Extract enhanced test script
-        enhanced_script = extract_test_script_from_chat(chat_result.chat_history)
-        
-        # Have the Script Reviewer critique the results
+        # Get review from script reviewer
         review_prompt = f"""
 Review this enhanced test script for the test case {test_case_id}.
 
-{chat_result.summary}
+{enhanced_response}
 
 Please provide a detailed critique focusing on:
 1. Reliability and robustness
@@ -309,122 +287,33 @@ Please provide a detailed critique focusing on:
 Be specific and provide examples for suggested improvements.
 """
         
-        # Send the enhanced script to the reviewer
-        review_result = await user_proxy.initiate_chat(
-            script_reviewer,
-            message=review_prompt,
-            max_turns=2
-        )
+        review = self.agents["script_reviewer"](review_prompt)
         
-        # Incorporate review feedback (if substantial improvements suggested)
-        if "improvements suggested" in review_result.summary.lower():
-            # Send back to coordinator with reviewer feedback
+        # If improvements suggested, get improved version
+        if "improvements suggested" in review.lower() or "improve" in review.lower():
             improvement_prompt = f"""
-The Script Reviewer has provided feedback on the implementation:
+The Script Reviewer has provided feedback:
 
-{review_result.summary}
+{review}
 
 Please improve the test script based on this feedback.
-Focus on addressing the key issues raised by the reviewer.
+
+Original enhanced script:
+{enhanced_response}
+
+Provide the final improved test script.
 """
             
-            improvement_result = coordinator.generate_reply(
-                messages=[{"role": "user", "content": improvement_prompt}]
-            )
-            
-            # Extract improved test script
-            improved_scripts = extract_code_blocks(improvement_result, "javascript")
-            if improved_scripts and len(improved_scripts) > 0:
-                # If we can identify clear improvements, use the last script
-                enhanced_script = improved_scripts[-1]
+            enhanced_response = self.agents["script_engineer"](improvement_prompt)
+        
+        # Extract enhanced test script
+        enhanced_scripts = extract_code_blocks(enhanced_response, "javascript")
+        enhanced_script = enhanced_scripts[-1] if enhanced_scripts else enhanced_response
         
         return {
             "enhanced_script": enhanced_script,
-            "conversation": conversation
+            "response": enhanced_response
         }
-    
-    async def _generate_from_selectors_original(self, test_case_id, test_case, selectors):
-        """
-        Original implementation for generating Page Object Models from selectors.
-        
-        Args:
-            test_case_id (str): The test case ID
-            test_case (dict): The test case data
-            selectors (list): List of selector data
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        print(f"🚀 Generating Page Object Models for {test_case_id} from selectors")
-        
-        try:
-            # Analyze selectors to identify pages
-            pages = analyze_selectors(selectors)
-            
-            # Use AI to enhance the page objects and generate a test script
-            user_proxy = self.agents["user_proxy"]
-            coordinator = self.agents["coordinator"]
-            
-            # Prepare selectors data for agents
-            selectors_json = json.dumps(selectors, indent=2)
-            
-            # Create prompt for the coordinator
-            prompt = f"""
-Please create a Page Object Model for Playwright based on these selectors and test case.
-
-Test Case ID: {test_case_id}
-Test Case Title: {test_case.get('title', '')}
-Test Steps: {test_case.get('steps', '')}
-Expected Results: {test_case.get('expectedResults', '')}
-
-Selectors Data:
-```json
-{selectors_json}
-```
-
-1. Create a BasePage class for common functionality
-2. Create Page Object classes based on logical pages identified in the selectors
-3. Create a test script that uses these Page Objects to implement the test case
-4. Make sure to follow enterprise best practices for Playwright testing
-
-Your output should include:
-1. All Page Object class files (BasePage.js and any page-specific classes)
-2. A complete test script that uses these Page Object classes
-"""
-            
-            # Start the conversation with the coordinator
-            chat_result = await user_proxy.initiate_chat(
-                coordinator,
-                message=prompt,
-                max_turns=6
-            )
-            
-            # Extract page objects and test script
-            page_objects = extract_page_objects_from_coordinator(chat_result.chat_history)
-            test_script = extract_test_script_from_chat(chat_result.chat_history)
-            
-            # Print debug info
-            print(f"Found {len(page_objects)} page objects and test script: {'Yes' if test_script else 'No'}")
-            
-            # Save the results
-            if page_objects and test_script:
-                self._save_results(test_case_id, page_objects, test_script)
-                return True
-            else:
-                print(f"❌ Failed to extract page objects or test script from response")
-                # Save the chat history for debugging
-                debug_file = f"debug_{test_case_id}_chat.txt"
-                with open(debug_file, "w", encoding="utf-8") as f:
-                    for msg in chat_result.chat_history:
-                        f.write(f"{msg['role']} ({msg.get('name', 'Unknown')}):\n{msg['content']}\n\n{'='*80}\n\n")
-                print(f"📝 Saved chat history to {debug_file} for debugging")
-                return False
-                
-        except Exception as e:
-            print(f"❌ Error generating from selectors: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
         
     def validate_integration(self, test_case_id=None):
         """
@@ -438,11 +327,11 @@ Your output should include:
         """
         print(f"🔍 Validating integration for generated files...")
         
-        # Run the integration validation
+        # Run the integration validation using LangChain agents
         validation_result = run_integration_validation(
             self.pages_dir,
             self.tests_dir,
-            self.agents
+            self.agents  # Pass LangChain agents
         )
         
         # If validation was successful, print a summary
@@ -455,7 +344,6 @@ Your output should include:
             print("\nSummary of key findings:")
             
             # Extract section headers for a brief summary
-            import re
             sections = re.findall(r'## ([^\n]+)', critique)
             for section in sections:
                 print(f"- {section}")
@@ -486,12 +374,12 @@ Your output should include:
         
         print(f"🔍 Analyzing critique and generating improvements: {critique_file}")
         
-        # Apply improvements based on the critique
+        # Apply improvements based on the critique using LangChain agents
         result = apply_critique_improvements(
             critique_file,
             self.pages_dir,
             self.tests_dir,
-            self.agents
+            self.agents  # Pass LangChain agents
         )
         
         if result["status"] == "success":
@@ -509,7 +397,7 @@ Your output should include:
     
     async def generate_with_design_first(self, test_case_id, test_case, selectors):
         """
-        Generate Page Object Models using a design-first approach with critique.
+        Generate Page Object Models using a design-first approach with LangChain agents.
         
         Args:
             test_case_id (str): The test case ID
@@ -549,10 +437,7 @@ Your output should include:
             return False
             
     def _generate_design(self, test_case_id, test_case, selectors):
-        """Generate a high-level design for the Page Objects and test script."""
-        user_proxy = self.agents["user_proxy"]
-        generator = self.agents.get("pom_generator", self.agents["coordinator"])
-        
+        """Generate a high-level design for the Page Objects and test script using LangChain."""
         # Prepare selectors data for the prompt
         selectors_json = json.dumps(selectors, indent=2)
         
@@ -564,7 +449,6 @@ Your output should include:
         )
         
         # Load and format the template
-        
         design_prompt = load_prompt_template(
             template_path,
             test_case_id=test_case_id,
@@ -574,22 +458,12 @@ Your output should include:
             selectors_json=selectors_json
         )
         
-        # Generate the design
-        design_result = user_proxy.initiate_chat(
-            generator,
-            message=design_prompt,
-            max_turns=1
-        )
-        
-        # Extract the design from the response
-        design = design_result.chat_history[-1]["content"]
+        # Generate the design using LangChain agent
+        design = self.agents["pom_generator"](design_prompt)
         return design
 
     def _critique_design(self, design):
-        """Have the critique agent review the design for potential issues."""
-        user_proxy = self.agents["user_proxy"]
-        critic = self.agents.get("integration_critic", self.agents["coordinator"])
-        
+        """Have the critique agent review the design for potential issues using LangChain."""
         # Load prompt from template file
         template_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
@@ -598,29 +472,17 @@ Your output should include:
         )
         
         # Load and format the template
-        
-        
         critique_prompt = load_prompt_template(
             template_path,
             design=design
         )
         
-        # Generate the critique
-        critique_result = user_proxy.initiate_chat(
-            critic,
-            message=critique_prompt,
-            max_turns=1
-        )
-        
-        # Extract the critique from the response
-        critique = critique_result.chat_history[-1]["content"]
+        # Generate the critique using LangChain agent
+        critique = self.agents["integration_critic"](critique_prompt)
         return critique
 
     def _generate_implementation(self, design, critique, test_case_id, selectors):
-        """Generate the actual implementation based on the design and critique."""
-        user_proxy = self.agents["user_proxy"]
-        generator = self.agents.get("pom_generator", self.agents["coordinator"])
-        
+        """Generate the actual implementation based on the design and critique using LangChain."""
         # Prepare selectors data for the prompt
         selectors_json = json.dumps(selectors, indent=2)
         
@@ -632,8 +494,6 @@ Your output should include:
         )
         
         # Load and format the template
-        
-        
         implementation_prompt = load_prompt_template(
             template_path,
             design=design,
@@ -642,16 +502,9 @@ Your output should include:
             selectors_json=selectors_json
         )
         
-        # Generate the implementation
-        implementation_result = user_proxy.initiate_chat(
-            generator,
-            message=implementation_prompt,
-            max_turns=1
-        )
+        # Generate the implementation using LangChain agent
+        response = self.agents["pom_generator"](implementation_prompt)
         
-        # Extract page objects and test script from the response
-        response = implementation_result.chat_history[-1]["content"]
-
         # Save debug output
         with open(f"debug_{test_case_id}_implementation.txt", "w", encoding="utf-8") as f:
             f.write(response)

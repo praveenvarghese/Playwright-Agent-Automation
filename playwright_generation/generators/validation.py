@@ -1,7 +1,7 @@
 """
 Integration validation module for Playwright test generation.
 This module provides functionality to validate the integration between
-Page Objects and Test Scripts.
+Page Objects and Test Scripts using LangChain agents.
 """
 
 import os
@@ -9,12 +9,12 @@ import json
 
 def run_integration_validation(pages_dir, tests_dir, agents):
     """
-    Run integration validation on the generated files.
+    Run integration validation on the generated files using LangChain agents.
     
     Args:
         pages_dir (str): Directory containing page object files
         tests_dir (str): Directory containing test script files
-        agents (dict): Dictionary of agent instances
+        agents (dict): Dictionary of LangChain agent functions
         
     Returns:
         dict: Validation results
@@ -32,25 +32,19 @@ def run_integration_validation(pages_dir, tests_dir, agents):
     # Prepare the prompt for the integration critic
     validation_prompt = _prepare_validation_prompt(page_objects, test_scripts)
     
-    # Get the integration critic agent (or use the coordinator if not available)
-    critic = agents.get("integration_critic", agents.get("coordinator"))
-    user_proxy = agents["user_proxy"]
+    # Get the integration critic agent
+    critic = agents.get("integration_critic")
     
     if not critic:
-        print("⚠️ No suitable agent found for integration validation")
-        return {"status": "error", "message": "No suitable agent found for validation"}
+        print("⚠️ No integration_critic agent found")
+        return {"status": "error", "message": "No integration_critic agent found"}
     
-    # Run the validation through the critic agent
+    # Run the validation through the critic agent (LangChain direct call)
     try:
         print("🤖 Consulting the Integration Critic...")
-        validation_result = user_proxy.initiate_chat(
-            critic,
-            message=validation_prompt,
-            max_turns=2
-        )
         
-        # Extract the critique from the response
-        critique = validation_result.chat_history[-1]["content"]
+        # Direct LangChain agent call (no conversation management needed)
+        critique = critic(validation_prompt)
         
         # Save the critique to a file
         critique_file = os.path.join(os.path.dirname(pages_dir), "integration_critique.md")

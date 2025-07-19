@@ -6,6 +6,7 @@ openai==1.58.1
 browser-use==0.1.39
 flaml[automl]
 langgraph
+langchain-openai
 # Azure SDK
 azure-search-documents==11.6.0b1
 azure-core==1.29.5

@@ -1,7 +1,7 @@
 """
 Critique feedback loop module for improving Playwright test code based on integration critique.
 This module handles extracting key issues from the critique and sending them back to the
-generation agents for improvements.
+generation agents for improvements using LangChain agents.
 """
 
 import os
@@ -10,13 +10,13 @@ import json
 
 def apply_critique_improvements(critique_file, pages_dir, tests_dir, agents):
     """
-    Apply improvements based on the integration critique.
+    Apply improvements based on the integration critique using LangChain agents.
     
     Args:
         critique_file (str): Path to the integration critique file
         pages_dir (str): Directory containing page object files
         tests_dir (str): Directory containing test script files
-        agents (dict): Dictionary of agent instances
+        agents (dict): Dictionary of LangChain agent functions
         
     Returns:
         dict: Results of the improvement process
@@ -54,24 +54,18 @@ def apply_critique_improvements(critique_file, pages_dir, tests_dir, agents):
         # Prepare the improvement prompt
         improvement_prompt = _prepare_improvement_prompt(original_files, key_issues)
         
-        # Get the appropriate agents
-        generator = agents.get("pom_generator", agents.get("coordinator"))
-        user_proxy = agents["user_proxy"]
+        # Get the appropriate LangChain agent
+        generator = agents.get("pom_generator")
         
         if not generator:
             print("⚠️ No suitable generator agent found")
             return {"status": "error", "message": "No suitable generator agent found"}
         
-        # Send the improvement request to the generator
+        # Send the improvement request to the generator (LangChain direct call)
         print("🤖 Requesting code improvements from generator...")
-        improvement_result = user_proxy.initiate_chat(
-            generator,
-            message=improvement_prompt,
-            max_turns=2
-        )
         
-        # Extract the improved code from the response
-        improved_code = improvement_result.chat_history[-1]["content"]
+        # Direct LangChain agent call (no conversation management)
+        improved_code = generator(improvement_prompt)
         
         # Save the improved files
         print("💾 Saving improved files...")
@@ -261,6 +255,7 @@ def _save_improved_files(improvement_response, pages_dir, tests_dir):
         saved_files = []
         
         # Create backup directory
+        import time
         backup_dir = os.path.join(os.path.dirname(pages_dir), "backups", 
                                    f"backup_{int(time.time())}")
         os.makedirs(backup_dir, exist_ok=True)
@@ -306,6 +301,3 @@ def _save_improved_files(improvement_response, pages_dir, tests_dir):
             "files": [],
             "count": 0
         }
-
-# Add this at the end of the file or in a separate import
-import time

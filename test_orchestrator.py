@@ -11,11 +11,7 @@ from playwright_generation.orchestration.agent_orchestrator import PlaywrightAge
 
 async def test_with_selectors_file(test_case_id, selectors_file):
     """
-    Test the PlaywrightAgentOrchestrator with an existing selectors file.
-    
-    Args:
-        test_case_id (str): Test case ID
-        selectors_file (str): Path to selectors JSON file
+    Test the PlaywrightAgentOrchestrator with existing selectors file.
     """
     print(f"🧪 Testing with selectors file: {selectors_file}")
     
@@ -29,7 +25,6 @@ async def test_with_selectors_file(test_case_id, selectors_file):
         "title": f"Test case {test_case_id}",
         "steps": "Login to the application and create an environment",
         "expectedResults": "Environment should be created successfully",
-        # Add other fields your test might need
         "loginUrl": os.getenv("APP_URL", "https://example.com"),
         "username": os.getenv("APP_USERNAME", "testuser"),
         "password": os.getenv("APP_PASSWORD", "password")
@@ -39,14 +34,14 @@ async def test_with_selectors_file(test_case_id, selectors_file):
     output_dir = os.path.join("test_output", test_case_id)
     orchestrator = PlaywrightAgentOrchestrator(output_dir=output_dir)
     
-    # Generate test with design-first approach
-    success = await orchestrator.generate_with_design_first(test_case_id, test_case, selectors)
+    # USE THE NEW METHOD with message-based agents
+    success = await orchestrator.generate_from_selectors(test_case_id, test_case, selectors)
     
     if success:
         print(f"✅ Test successful - generated files in {output_dir}")
     else:
         print(f"❌ Test failed - check logs for details")
-
+        
 if __name__ == "__main__":
     # Get test case ID from command line
     if len(sys.argv) < 2:

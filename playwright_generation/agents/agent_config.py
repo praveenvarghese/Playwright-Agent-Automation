@@ -1,17 +1,15 @@
 """
 Agent configuration for AI-enhanced Playwright test generation.
-This module defines and configures all the Autogen agents used in the system.
+This module defines and configures all the LangChain-based agents used in the system.
+IMPROVED: Now agents communicate through messages and have memory.
 """
 
 import os
-import autogen
 from dotenv import load_dotenv
+from langchain_openai import AzureChatOpenAI
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from typing import List
 from playwright_generation.agents.agent_prompts import(
-    POM_ENGINEER_PROMPT,
-    POM_REVIEWER_PROMPT,
-    SCRIPT_ENGINEER_PROMPT,
-    SCRIPT_REVIEWER_PROMPT,
-    # Add new prompt constants
     POM_GENERATOR_PROMPT,
     POM_CRITIC_PROMPT,
     TEST_GENERATOR_PROMPT,
@@ -22,118 +20,211 @@ from playwright_generation.agents.agent_prompts import(
 # Load environment variables
 load_dotenv()
 
-# Configure OpenAI API
-config_list = [
-    {
-        "model": os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),  # Use the deployment name
-        "api_key": os.getenv("AZURE_OPENAI_API_KEY"),
-        "api_type": "azure",
-        "base_url": os.getenv("AZURE_OPENAI_ENDPOINT"),
-        "api_version": os.getenv("AZURE_OPENAI_API_VERSION")
-    }
-]
-
-# Configure agents with Azure OpenAI settings
-def get_llm_config():
-    """Get LLM configuration for agents."""
-    return {
-        "config_list": config_list,
-        "temperature": 0.2,
-        "cache_seed": 42  # For reproducibility
-    }
+def get_langchain_llm():
+    """Get LangChain LLM instance for agents."""
+    return AzureChatOpenAI(
+        azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
+        openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+        temperature=0.2,
+        model_name="gpt-4o-mini",  # Explicitly specify the model
+    )
 
 def create_agents():
     """Create and configure all agents needed for Playwright test generation."""
     
-    # Define agent configurations with Azure OpenAI settings
-    llm_config = get_llm_config()
+    llm = get_langchain_llm()
     
-    # Coordinator Agent (instead of UserProxyAgent)
-    coordinator = autogen.AssistantAgent(
-        name="Coordinator",
-        system_message="You are a coordinator for the test generation process. You coordinate between the engineering and review agents.",
-        llm_config=llm_config
-    )
+    # IMPROVED: Agents now work with messages and have memory
+    def pom_generator(messages: List[BaseMessage], agent_name: str = "POM_Generator") -> AIMessage:
+        """Generate Page Object Models based on conversation history."""
+        try:
+            # Build conversation with system prompt
+            conversation = [
+                SystemMessage(content=POM_GENERATOR_PROMPT)
+            ]
+            
+            # Add conversation history so agent can see previous work
+            conversation.extend(messages)
+            
+            response = llm.invoke(conversation)
+            
+            # Return as AIMessage with agent identification
+            return AIMessage(
+                content=response.content,
+                name=agent_name,
+                additional_kwargs={"agent_type": "generator"}
+            )
+        except Exception as e:
+            print(f"Error in POM Generator: {str(e)}")
+            return AIMessage(
+                content=f"Error generating POM: {str(e)}",
+                name=agent_name
+            )
     
-    # POM Engineer Agent
-    pom_engineer = autogen.AssistantAgent(
-        name="POM_Engineer",
-        system_message=POM_ENGINEER_PROMPT,
-        llm_config=llm_config
-    )
+    def pom_critic(messages: List[BaseMessage], agent_name: str = "POM_Critic") -> AIMessage:
+        """Critique Page Object Models with full conversation context."""
+        try:
+            # Build conversation with system prompt
+            conversation = [
+                SystemMessage(content=POM_CRITIC_PROMPT)
+            ]
+            
+            # Add full conversation history - critic can see generator's work
+            conversation.extend(messages)
+            
+            # Add specific instruction to reference previous work
+            if messages:
+                conversation.append(
+                    HumanMessage(content="Please review the Page Object Models generated above and provide specific feedback.")
+                )
+            
+            response = llm.invoke(conversation)
+            
+            return AIMessage(
+                content=response.content,
+                name=agent_name,
+                additional_kwargs={"agent_type": "critic"}
+            )
+        except Exception as e:
+            print(f"Error in POM Critic: {str(e)}")
+            return AIMessage(
+                content=f"Error critiquing POM: {str(e)}",
+                name=agent_name
+            )
     
-    # POM Reviewer Agent
-    pom_reviewer = autogen.AssistantAgent(
-        name="POM_Reviewer",
-        system_message=POM_REVIEWER_PROMPT,
-        llm_config=llm_config
-    )
+    def test_generator(messages: List[BaseMessage], agent_name: str = "Test_Generator") -> AIMessage:
+        """Generate Playwright test scripts using Page Object Models from conversation."""
+        try:
+            conversation = [
+                SystemMessage(content=TEST_GENERATOR_PROMPT)
+            ]
+            
+            # Add conversation history so test generator can see POM work
+            conversation.extend(messages)
+            
+            response = llm.invoke(conversation)
+            
+            return AIMessage(
+                content=response.content,
+                name=agent_name,
+                additional_kwargs={"agent_type": "generator"}
+            )
+        except Exception as e:
+            print(f"Error in Test Generator: {str(e)}")
+            return AIMessage(
+                content=f"Error generating test: {str(e)}",
+                name=agent_name
+            )
     
-    # Script Engineer Agent
-    script_engineer = autogen.AssistantAgent(
-        name="Script_Engineer",
-        system_message=SCRIPT_ENGINEER_PROMPT,
-        llm_config=llm_config
-    )
+    def test_critic(messages: List[BaseMessage], agent_name: str = "Test_Critic") -> AIMessage:
+        """Critique test scripts with full conversation context."""
+        try:
+            conversation = [
+                SystemMessage(content=TEST_CRITIC_PROMPT)
+            ]
+            
+            # Add conversation history - critic can see all previous work
+            conversation.extend(messages)
+            
+            if messages:
+                conversation.append(
+                    HumanMessage(content="Please review the test script generated above and provide specific feedback.")
+                )
+            
+            response = llm.invoke(conversation)
+            
+            return AIMessage(
+                content=response.content,
+                name=agent_name,
+                additional_kwargs={"agent_type": "critic"}
+            )
+        except Exception as e:
+            print(f"Error in Test Critic: {str(e)}")
+            return AIMessage(
+                content=f"Error critiquing test: {str(e)}",
+                name=agent_name
+            )
     
-    # Script Reviewer Agent
-    script_reviewer = autogen.AssistantAgent(
-        name="Script_Reviewer",
-        system_message=SCRIPT_REVIEWER_PROMPT,
-        llm_config=llm_config
-    )
-    
-    # NEW: Specialized Agents for enhanced workflow
-    pom_generator = autogen.AssistantAgent(
-        name="POM_Generator",
-        system_message=POM_GENERATOR_PROMPT,
-        llm_config=llm_config
-    )
-    
-    pom_critic = autogen.AssistantAgent(
-        name="POM_Critic",
-        system_message=POM_CRITIC_PROMPT,
-        llm_config=llm_config
-    )
-    
-    test_generator = autogen.AssistantAgent(
-        name="Test_Generator",
-        system_message=TEST_GENERATOR_PROMPT,
-        llm_config=llm_config
-    )
-    
-    test_critic = autogen.AssistantAgent(
-        name="Test_Critic",
-        system_message=TEST_CRITIC_PROMPT,
-        llm_config=llm_config
-    )
-    
-    # Create a UserProxyAgent just for initiating the conversations
-    # This one has code execution disabled to prevent Docker issues
-    user_proxy = autogen.UserProxyAgent(
-        name="User",
-        human_input_mode="NEVER",
-        max_consecutive_auto_reply=0,
-        code_execution_config={"use_docker": False}
-    )
+    def integration_critic(messages: List[BaseMessage], agent_name: str = "Integration_Critic") -> AIMessage:
+        """Provide integration critique with full conversation context."""
+        try:
+            conversation = [
+                SystemMessage(content=INTEGRATION_CRITIC_PROMPT)
+            ]
+            
+            conversation.extend(messages)
+            
+            response = llm.invoke(conversation)
+            
+            return AIMessage(
+                content=response.content,
+                name=agent_name,
+                additional_kwargs={"agent_type": "integration_critic"}
+            )
+        except Exception as e:
+            print(f"Error in Integration Critic: {str(e)}")
+            return AIMessage(
+                content=f"Error in integration critique: {str(e)}",
+                name=agent_name
+            )
 
-    integration_critic = autogen.AssistantAgent(
-        name="Integration_Critic",
-        system_message=INTEGRATION_CRITIC_PROMPT,
-        llm_config=llm_config
-    )
     
+    # Return dictionary with both new message-based and legacy agents
     return {
-        "user_proxy": user_proxy,
-        "coordinator": coordinator,
-        "pom_engineer": pom_engineer,
-        "pom_reviewer": pom_reviewer,
-        "script_engineer": script_engineer,
-        "script_reviewer": script_reviewer,
-        # Add new specialized agents
-        "pom_generator": pom_generator,
-        "pom_critic": pom_critic,
-        "test_generator": test_generator,
-        "test_critic": test_critic,
-        "integration_critic": integration_critic
+        # NEW MESSAGE-BASED AGENTS (use these!)
+        "pom_generator_v2": pom_generator,
+        "pom_critic_v2": pom_critic,
+        "test_generator_v2": test_generator,
+        "test_critic_v2": test_critic,
+        "integration_critic_v2": integration_critic,
+        
+        # LEGACY AGENTS (for backward compatibility)
+        # "coordinator": coordinator,
+        # "pom_engineer": pom_engineer,
+        # "pom_reviewer": pom_reviewer,
+        # "script_engineer": script_engineer,
+        # "script_reviewer": script_reviewer,
+        # "pom_generator": lambda prompt: pom_generator([HumanMessage(content=prompt)]).content,
+        # "pom_critic": lambda prompt: pom_critic([HumanMessage(content=prompt)]).content,
+        # "test_generator": lambda prompt: test_generator([HumanMessage(content=prompt)]).content,
+        # "test_critic": lambda prompt: test_critic([HumanMessage(content=prompt)]).content,
+        # "integration_critic": lambda prompt: integration_critic([HumanMessage(content=prompt)]).content
     }
+
+def test_agents():
+    """Test function to verify agents are working correctly."""
+    try:
+        agents = create_agents()
+        
+        # Test new message-based agents
+        test_messages = [
+            HumanMessage(content="Create a simple LoginPage class with username and password fields.")
+        ]
+        
+        result = agents["pom_generator_v2"](test_messages)
+        print("✅ New POM Generator working")
+        print(f"Sample output length: {len(result.content)} characters")
+        print(f"Agent name: {result.name}")
+        
+        # Test that critic can see generator's work
+        messages_with_context = test_messages + [result]
+        critique = agents["pom_critic_v2"](messages_with_context)
+        print("✅ POM Critic can see generator's work")
+        print(f"Critique length: {len(critique.content)} characters")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Agent test failed: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    """Test the agents when running this file directly."""
+    print("Testing improved LangGraph agents...")
+    success = test_agents()
+    if success:
+        print("✅ All agents configured successfully!")
+    else:
+        print("❌ Agent configuration failed!")
