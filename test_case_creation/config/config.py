@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 from browser_use import BrowserConfig, Browser
 from browser_use.browser.context import BrowserContextConfig, BrowserContext
 import autogen
+from typing import TypedDict, List, Optional
+from langchain_openai import AzureChatOpenAI
 
 # Load environment variables
 load_dotenv()
@@ -41,6 +43,34 @@ config_list = [
         "api_type": "azure",  # Specify that we're using Azure OpenAI
     }
 ]
+
+class TestGenerationState(TypedDict):
+    # Input
+    feature_requirement: str
+    acceptance_criteria_text: str
+    similar_cases: Optional[List[dict]]
+    context: str
+    
+    # Processing
+    current_test_cases: str
+    iteration_count: int
+    max_iterations: int
+    
+    # Output
+    final_test_cases: str
+    critique: str
+    raw_responses: List[str]  # For debugging
+
+# ADD these LangGraph agent wrappers after existing agent definitions
+def create_langgraph_llm():
+    """Create LangChain LLM for LangGraph agents."""
+    return AzureChatOpenAI(
+        openai_api_key=azure_api_key,
+        azure_deployment=azure_deployment,
+        azure_endpoint=azure_base_url,
+        api_version=azure_api_version,
+        temperature=0.2
+    )
 
 # **Define Agents**
 TestCaseAgent = autogen.AssistantAgent(
