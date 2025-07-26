@@ -17,7 +17,7 @@ class TestGenerationState(TypedDict):
     # Input data
     test_case_id: str
     test_case: dict
-    execution_log: list
+    selectors: list
     
     # NEW: Message history for agent communication
     messages: List[BaseMessage]
@@ -44,7 +44,7 @@ def create_test_generation_workflow():
         """Step 1: Generate Page Object Models with conversation context"""
         print("🔍 Step 1: Generating Page Object Models")
         
-        execution_log_json = json.dumps(state["execution_log"], indent=2)
+        selectors_json = json.dumps(state["selectors"], indent=2)
         test_case = state["test_case"]
         
         # Create initial message with context
@@ -57,7 +57,7 @@ Test Case Title: {test_case.get('title', '')}
 
 MCP Execution Log (contains actual working Playwright code):
 ```json
-{execution_log_json}
+{selectors_json}
 ```
 
 Instructions:
@@ -322,7 +322,7 @@ Ensure all critique points are addressed and the test follows best practices.
     return workflow.compile()
 
 
-async def generate_with_specialized_agents(agents, test_case_id, test_case, execution_log, 
+async def generate_with_specialized_agents(agents, test_case_id, test_case, selectors, 
                                           save_callback, pages_dir, tests_dir):
     """
     IMPROVED: Main function with proper message-based agent communication.
@@ -349,7 +349,7 @@ async def generate_with_specialized_agents(agents, test_case_id, test_case, exec
         initial_state = {
             "test_case_id": test_case_id,
             "test_case": test_case,
-            "execution_log": execution_log,
+            "selectors": selectors,
             "messages": [],  # Start with empty message history
             "pom_response": "",
             "pom_critique": "",

@@ -59,7 +59,7 @@ class PlaywrightAgentOrchestrator:
         else:
             print("⚠️ Integration validation failed - skipping feedback loop")
 
-    async def generate_from_selectors(self, test_case_id, test_case, execution_log):
+    async def generate_from_selectors(self, test_case_id, test_case, selectors):
         """Generate Page Object Models directly from selectors using LangGraph workflow."""
         
         # Use the working LangGraph workflow
@@ -67,7 +67,7 @@ class PlaywrightAgentOrchestrator:
             None,  # Don't pass agents, let it create its own
             test_case_id, 
             test_case, 
-            execution_log, 
+            selectors, 
             lambda tc_id, page_objects, test_script: self._save_results(tc_id, page_objects, test_script),
             self.pages_dir, 
             self.tests_dir
