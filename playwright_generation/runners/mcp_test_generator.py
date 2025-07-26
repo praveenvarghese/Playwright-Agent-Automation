@@ -230,41 +230,89 @@ Continue until all test steps are completed or you encounter an error.
     return execution_log
 
 def extract_selectors(execution_log):
-    """Extract selectors from MCP execution log"""
+    """Extract REAL Playwright locators from MCP execution log"""
     selectors = []
     
     for i, entry in enumerate(execution_log):
         tool = entry["tool"]
         args = entry["args"]
+        result = entry.get("result", {})
+        
+        # Extract the working Playwright locator from MCP response
+        playwright_locator = extract_playwright_locator(result)
+        element_name = args.get("element", "")
         
         if tool == "browser_navigate":
             selectors.append({
                 "action": "navigate",
                 "tag": "page", 
                 "text": f"Navigate to {args.get('url', '')}",
-                "selector": ""
+                "selector": "",
+                "url": args.get('url', '')
             })
             
         elif tool == "browser_type":
-            element = args.get("element", "")
-            text = args.get("text", "")
+            input_text = args.get("text", "")
             selectors.append({
                 "action": "input",
                 "tag": "input",
-                "text": f"⌨️ Input {text} into {element}",
-                "selector": f"[placeholder*='{element.lower()}'], #{element.lower()}, input[name*='{element.lower()}']"
+                "text": f"⌨️ Input {input_text} into {element_name}",
+                "selector": playwright_locator,  # REAL locator from MCP
+                "input_value": input_text,
+                "element_name": element_name
             })
             
         elif tool == "browser_click":
-            element = args.get("element", "")
             selectors.append({
                 "action": "click", 
                 "tag": "button",
-                "text": f"🖱️ Click {element}",
-                "selector": f"button:has-text('{element}'), [role='button']:has-text('{element}')"
+                "text": f"🖱️ Click {element_name}",
+                "selector": playwright_locator,  # REAL locator from MCP
+                "element_name": element_name
             })
     
     return selectors
+
+def extract_playwright_locator(result):
+    """
+    Extract Playwright locator from MCP tool response.
+    
+    Input: MCP result containing text like:
+    "await page.getByRole('textbox', { name: 'Username' }).fill('admin');"
+    
+    Output: "getByRole('textbox', { name: 'Username' })"
+    """
+    try:
+        # Get the text content from MCP response
+        if not isinstance(result, dict) or "content" not in result:
+            return None
+            
+        for content_item in result["content"]:
+            if isinstance(content_item, dict) and "text" in content_item:
+                text = content_item["text"]
+                
+                # Look for Playwright code lines
+                lines = text.split('\n')
+                for line in lines:
+                    clean_line = line.strip()
+                    if clean_line.startswith('await page.'):
+                        # Extract locator part from line like:
+                        # "await page.getByRole('textbox', { name: 'Username' }).fill('admin');"
+                        
+                        import re
+                        # Pattern: await page.LOCATOR.ACTION(...)
+                        pattern = r"await page\.(.+?)\.(fill|click|press|selectOption|check|clear|goto)"
+                        match = re.search(pattern, clean_line)
+                        
+                        if match:
+                            locator_part = match.group(1)
+                            print(f"✅ Extracted locator: {locator_part}")
+                            return locator_part
+                            
+    except Exception as e:
+        print(f"⚠️ Error extracting Playwright locator: {e}")
+        
+    return None
 
 async def generate_page_objects(test_case_id, test_case, selectors, output_dir):
     """Generate Page Objects using existing orchestrator"""
