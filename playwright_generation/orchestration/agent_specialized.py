@@ -17,7 +17,7 @@ class TestGenerationState(TypedDict):
     # Input data
     test_case_id: str
     test_case: dict
-    selectors: list
+    execution_log: list
     
     # NEW: Message history for agent communication
     messages: List[BaseMessage]
@@ -44,7 +44,7 @@ def create_test_generation_workflow():
         """Step 1: Generate Page Object Models with conversation context"""
         print("🔍 Step 1: Generating Page Object Models")
         
-        selectors_json = json.dumps(state["selectors"], indent=2)
+        execution_log_json = json.dumps(state["execution_log"], indent=2)
         test_case = state["test_case"]
         
         # Create initial message with context
@@ -55,9 +55,9 @@ Generate Page Object Models for Playwright based on the provided selectors.
 Test Case ID: {state["test_case_id"]}
 Test Case Title: {test_case.get('title', '')}
 
-Selectors Data:
+MCP Execution Log (contains actual working Playwright code):
 ```json
-{selectors_json}
+{execution_log_json}
 ```
 
 Instructions:
@@ -322,7 +322,7 @@ Ensure all critique points are addressed and the test follows best practices.
     return workflow.compile()
 
 
-async def generate_with_specialized_agents(agents, test_case_id, test_case, selectors, 
+async def generate_with_specialized_agents(agents, test_case_id, test_case, execution_log, 
                                           save_callback, pages_dir, tests_dir):
     """
     IMPROVED: Main function with proper message-based agent communication.
@@ -331,7 +331,7 @@ async def generate_with_specialized_agents(agents, test_case_id, test_case, sele
         agents (dict): Not used anymore (we get agents internally)
         test_case_id (str): The test case ID
         test_case (dict): The test case data
-        selectors (list): List of selector data
+        execution_log (list): MCP execution log with actual browser interactions
         save_callback (function): Callback function to save results
         pages_dir (str): Directory to save page objects
         tests_dir (str): Directory to save test scripts
@@ -349,7 +349,7 @@ async def generate_with_specialized_agents(agents, test_case_id, test_case, sele
         initial_state = {
             "test_case_id": test_case_id,
             "test_case": test_case,
-            "selectors": selectors,
+            "execution_log": execution_log,
             "messages": [],  # Start with empty message history
             "pom_response": "",
             "pom_critique": "",

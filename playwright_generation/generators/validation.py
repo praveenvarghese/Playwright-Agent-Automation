@@ -33,7 +33,7 @@ def run_integration_validation(pages_dir, tests_dir, agents):
     validation_prompt = _prepare_validation_prompt(page_objects, test_scripts)
     
     # Get the integration critic agent
-    critic = agents.get("integration_critic")
+    critic = agents.get("integration_critic_v2")
     
     if not critic:
         print("⚠️ No integration_critic agent found")
@@ -49,7 +49,7 @@ def run_integration_validation(pages_dir, tests_dir, agents):
         # Save the critique to a file
         critique_file = os.path.join(os.path.dirname(pages_dir), "integration_critique.md")
         with open(critique_file, "w", encoding="utf-8") as f:
-            f.write(critique)
+            f.write(critique.content)
         
         print(f"✅ Integration validation complete. Results saved to {critique_file}")
         return {

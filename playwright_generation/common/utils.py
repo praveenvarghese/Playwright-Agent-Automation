@@ -81,7 +81,7 @@ def extract_class_name(code_block):
     Returns:
         str: Extracted class name or None if not found
     """
-    match = re.search(r"class\s+(\w+)", code_block)
+    match = re.search(r"export class\s+(\w+)", code_block)
     if match:
         return match.group(1)
     return None

@@ -37,14 +37,10 @@ async def generate_test_with_mcp(test_case_id: str, output_dir: str = "mcp_tests
         return False
         
     # Step 3: Extract selectors
-    selectors = extract_selectors(execution_log)
-    with open(f"{test_case_id}_selectors.json", "w") as f:
-        json.dump(selectors, f, indent=2)
-    print(f"✅ Generated {len(selectors)} selectors")
-        
+
     # Step 4: Generate Page Objects
     os.makedirs(output_dir, exist_ok=True)
-    success = await generate_page_objects(test_case_id, test_case, selectors, output_dir)
+    success = await generate_page_objects(test_case_id, test_case, execution_log, output_dir)
     
     if success:
         print(f"🎉 Test generation completed successfully for {test_case_id}")

@@ -99,3 +99,25 @@ export class LoginPage extends BasePage {
    - Methods should start with verbs (create, select, get, etc.)
 
 Follow these rules to create maintainable Page Objects.
+
+## Extract Selectors from MCP Execution Log
+
+## CRITICAL: Extract Actual Working Selectors from MCP Execution Log
+
+You MUST extract selectors from the actual Playwright code in the MCP execution log.
+
+Look for entries like this in the execution log:
+```json
+{
+  "tool": "browser_type",
+  "result": {
+    "content": [{
+      "text": "await page.getByRole('textbox', { name: 'Username' }).fill('admin');"
+    }]
+  }
+}
+
+You will receive an MCP execution log showing actual working Playwright code.
+Extract the real selectors from the "result.content.text" fields that contain Playwright code.
+
+Use the actual working selectors, not generic assumptions.
