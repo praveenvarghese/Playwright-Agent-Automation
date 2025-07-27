@@ -30,6 +30,13 @@ class TestGenerationState(TypedDict):
     test_critique: str
     final_test_script: str
     
+    # NEW: Integration loop tracking
+    integration_feedback: str
+    integration_improvements: str
+    integration_final_check: str
+    integration_iteration: int
+    needs_integration_improvement: bool
+    
     # Output
     page_objects: list
     test_file: str
@@ -284,15 +291,127 @@ Ensure all critique points are addressed and the test follows best practices.
         
         updated_messages = current_messages + [response]
         
-        # Extract final outputs using existing extraction functions
-        # Use the improved POM response for page objects
-        page_objects = extract_page_objects_from_specialized(state["improved_pom"])
-        test_file = extract_test_script_from_specialized(response.content)
-        
         return {
             **state, 
             "messages": updated_messages,
-            "final_test_script": response.content,
+            "final_test_script": response.content
+        }
+
+    def integration_review_node(state: TestGenerationState) -> TestGenerationState:
+        """Step 7: Integration Framework Expert Review"""
+        print("🔍 Step 7: Integration Framework Expert Review")
+        
+        review_request = HumanMessage(
+            content="""
+As a Playwright Framework Expert, please analyze all the generated Page Object Models and test scripts above for integration issues.
+
+Check the complete system for:
+1. Import/Export mappings consistency
+2. Cross-file method calls and dependencies  
+3. Selector strategy alignment
+4. Method signature compatibility
+5. ES6 module compliance
+6. Playwright best practices
+
+Provide specific feedback on any integration issues that need to be fixed.
+""",
+            name="User"
+        )
+        
+        current_messages = state["messages"] + [review_request]
+        response = agents["integration_framework_expert"](current_messages)
+        updated_messages = current_messages + [response]
+        
+        return {
+            **state,
+            "messages": updated_messages,
+            "integration_feedback": response.content,
+            "integration_iteration": state.get("integration_iteration", 0)
+        }
+
+    def integration_improvement_node(state: TestGenerationState) -> TestGenerationState:
+        """Step 8: Fix Integration Issues"""
+        print("🔍 Step 8: Fixing Integration Issues")
+        
+        improvement_request = HumanMessage(
+            content="""
+Based on the integration feedback provided above, please fix the specific integration issues mentioned.
+
+Provide corrected versions of any files that need fixes to ensure perfect cross-file integration.
+
+Use the format:
+### FileName.js
+```javascript
+// Fixed implementation
+```
+
+Only provide files that actually need corrections based on the feedback.
+""",
+            name="User"
+        )
+        
+        current_messages = state["messages"] + [improvement_request]
+        response = agents["integration_improvement_agent"](current_messages)
+        updated_messages = current_messages + [response]
+        
+        return {
+            **state,
+            "messages": updated_messages,
+            "integration_improvements": response.content,
+            "integration_iteration": state.get("integration_iteration", 0) + 1
+        }
+
+    def integration_check_node(state: TestGenerationState) -> TestGenerationState:
+        """Step 9: Check if Integration is Good Enough"""
+        print("🔍 Step 9: Checking Integration Quality")
+        
+        check_request = HumanMessage(
+            content="""
+Please do a final check on the integration quality of all files above.
+
+Are there any remaining integration issues, or is the system ready for production use?
+
+Respond with either:
+"✅ INTEGRATION_APPROVED - System is ready"
+or
+"❌ INTEGRATION_ISSUES - [specific remaining issues]"
+""",
+            name="User"
+        )
+        
+        current_messages = state["messages"] + [check_request]
+        response = agents["integration_framework_expert"](current_messages)
+        updated_messages = current_messages + [response]
+        
+        # Determine if we need another iteration
+        needs_improvement = "❌ INTEGRATION_ISSUES" in response.content
+        max_iterations = 3
+        current_iteration = state.get("integration_iteration", 0)
+        
+        # Extract final outputs if approved or max iterations reached
+        if not needs_improvement or current_iteration >= max_iterations:
+            # Try to get corrected files from integration improvements first
+            if state.get("integration_improvements"):
+                page_objects = extract_page_objects_from_specialized(state["integration_improvements"])
+                test_file = extract_test_script_from_specialized(state["integration_improvements"])
+            else:
+                page_objects = []
+                test_file = ""
+            
+            # If no integration improvements, fall back to original improved content
+            if not page_objects:
+                page_objects = extract_page_objects_from_specialized(state["improved_pom"])
+            if not test_file:
+                test_file = extract_test_script_from_specialized(state["final_test_script"])
+        else:
+            page_objects = []
+            test_file = ""
+        
+        return {
+            **state,
+            "messages": updated_messages,
+            "integration_final_check": response.content,
+            "needs_integration_improvement": needs_improvement and current_iteration < max_iterations,
             "page_objects": page_objects,
             "test_file": test_file
         }
@@ -307,17 +426,32 @@ Ensure all critique points are addressed and the test follows best practices.
     workflow.add_node("generate_test", generate_test_node)
     workflow.add_node("critique_test", critique_test_node)
     workflow.add_node("improve_test", improve_test_node)
+    workflow.add_node("integration_review", integration_review_node)
+    workflow.add_node("integration_improvement", integration_improvement_node) 
+    workflow.add_node("integration_check", integration_check_node)
     
-    # Add edges
+    # FIXED: Correct edge sequence
     workflow.add_edge("generate_pom", "critique_pom")
     workflow.add_edge("critique_pom", "improve_pom")
     workflow.add_edge("improve_pom", "generate_test")
     workflow.add_edge("generate_test", "critique_test")
     workflow.add_edge("critique_test", "improve_test")
+    workflow.add_edge("improve_test", "integration_review")
+    workflow.add_edge("integration_review", "integration_improvement")
+    workflow.add_edge("integration_improvement", "integration_check")
     
-    # Set entry and exit points
+    # FIXED: Conditional edge for iteration loop
+    workflow.add_conditional_edges(
+        "integration_check",
+        lambda state: "improve_more" if state.get("needs_integration_improvement", False) else "done",
+        {
+            "improve_more": "integration_improvement",
+            "done": END
+        }
+    )
+    
+    # Set entry point
     workflow.set_entry_point("generate_pom")
-    workflow.add_edge("improve_test", END)
     
     return workflow.compile()
 
@@ -331,7 +465,7 @@ async def generate_with_specialized_agents(agents, test_case_id, test_case, sele
         agents (dict): Not used anymore (we get agents internally)
         test_case_id (str): The test case ID
         test_case (dict): The test case data
-        execution_log (list): MCP execution log with actual browser interactions
+        selectors (list): MCP selectors with actual browser interactions
         save_callback (function): Callback function to save results
         pages_dir (str): Directory to save page objects
         tests_dir (str): Directory to save test scripts
@@ -345,7 +479,7 @@ async def generate_with_specialized_agents(agents, test_case_id, test_case, sele
         # Create the workflow
         workflow = create_test_generation_workflow()
         
-        # IMPROVED: Initial state with message history
+        # IMPROVED: Initial state with message history and integration fields
         initial_state = {
             "test_case_id": test_case_id,
             "test_case": test_case,
@@ -357,6 +491,11 @@ async def generate_with_specialized_agents(agents, test_case_id, test_case, sele
             "test_script": "",
             "test_critique": "",
             "final_test_script": "",
+            "integration_feedback": "",
+            "integration_improvements": "",
+            "integration_final_check": "",
+            "integration_iteration": 0,
+            "needs_integration_improvement": False,
             "page_objects": [],
             "test_file": ""
         }

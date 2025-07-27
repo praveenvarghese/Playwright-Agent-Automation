@@ -146,6 +146,74 @@ def create_agents():
                 name=agent_name
             )
 
+    def integration_framework_expert(messages: List[BaseMessage], agent_name: str = "Integration_Framework_Expert") -> AIMessage:
+        """Framework expert that analyzes complete system for integration issues."""
+        try:
+            system_prompt = """You are a Playwright Framework Expert. Analyze the complete generated Page Object Models and test scripts for integration issues.
+
+    Check for:
+    1. Import/Export mappings - Do imports match actual exports?
+    2. Cross-file dependencies - Are PageObject methods called correctly?
+    3. Selector consistency - Same elements using consistent strategies?
+    4. Method signatures - Do test calls match PageObject parameters?
+    5. ES6 module compliance - Proper module syntax?
+    6. Playwright best practices - Proper locators, waits, assertions?
+
+    Provide specific feedback on what needs to be fixed for perfect integration."""
+
+            conversation = [SystemMessage(content=system_prompt)]
+            conversation.extend(messages)
+            
+            response = llm.invoke(conversation)
+            
+            return AIMessage(
+                content=response.content,
+                name=agent_name,
+                additional_kwargs={"agent_type": "integration_expert"}
+            )
+        except Exception as e:
+            print(f"Error in Integration Framework Expert: {str(e)}")
+            return AIMessage(
+                content=f"Error in framework analysis: {str(e)}",
+                name=agent_name
+            )
+
+    def integration_improvement_agent(messages: List[BaseMessage], agent_name: str = "Integration_Improvement") -> AIMessage:
+        """Specialized agent that fixes cross-file integration issues."""
+        try:
+            system_prompt = """You are an Integration Improvement Specialist. Based on framework expert feedback, fix cross-file integration issues.
+
+    Your job:
+    1. Read the integration feedback provided
+    2. Fix the specific issues mentioned
+    3. Ensure all files work together perfectly
+    4. Maintain the same functionality while fixing integration problems
+
+    Provide corrected versions of files that need fixes using the same format:
+    ### FileName.js
+    ```javascript
+    // Fixed implementation
+    ```
+
+    Only provide files that actually need fixes based on the feedback."""
+
+            conversation = [SystemMessage(content=system_prompt)]
+            conversation.extend(messages)
+            
+            response = llm.invoke(conversation)
+            
+            return AIMessage(
+                content=response.content,
+                name=agent_name,
+                additional_kwargs={"agent_type": "integration_improvement"}
+            )
+        except Exception as e:
+            print(f"Error in Integration Improvement: {str(e)}")
+            return AIMessage(
+                content=f"Error in integration improvement: {str(e)}",
+                name=agent_name
+            )
+    
     # Return only the working v2 message-based agents
     return {
         "pom_generator_v2": pom_generator,
@@ -153,6 +221,8 @@ def create_agents():
         "test_generator_v2": test_generator,
         "test_critic_v2": test_critic,
         "integration_critic_v2": integration_critic,
+        "integration_framework_expert": integration_framework_expert,  # NEW
+        "integration_improvement_agent": integration_improvement_agent,  # NEW
     }
 
 def test_agents():

@@ -21,14 +21,13 @@ Look for the actual Playwright code in the MCP execution log entries. Extract se
 ## Critical: Generate Methods Based on Selector Format
 
 - **If selectors are getByRole(), getByLabel(), getByText() etc.** → Generate BasePage methods that use locator.waitFor(), locator.click(), locator.fill()
-- **If selectors are CSS (#id, .class, [data-testid])** → Generate BasePage methods that use page.waitForSelector(), page.click(), page.fill()
-- **Match the method calls to the selector format** - don't mix CSS selector methods with Playwright locator selectors
+- **Use only the playwright selector generated**
 
 ## Requirements
 
 - Use ES6 module syntax with named exports
 - Extract selectors exactly as they appear in execution log
-- Generate BasePage methods that handle the actual selector format used
+- Generate BasePage methods that handle the playwright selector format used
 - Create page classes based on logical groupings you identify
 - Generate method names based on actual actions in test steps
 - Add error handling appropriate for the actions

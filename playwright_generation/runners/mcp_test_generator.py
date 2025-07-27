@@ -113,10 +113,15 @@ CONTEXT:
 - Username: {os.getenv('APP_USERNAME')}
 - Password: {os.getenv('APP_PASSWORD')}
 
+🚨 CRITICAL: Use CSS selectors ONLY for all interactions:
+- Examples: #username, input[name="password"], button[type="submit"]
+- DO NOT use getByRole, getByText, getByLabel, or other Playwright locator methods
+- Use traditional CSS selectors like .class, #id, [attribute="value"]
+
 PREREQUISITE STEPS:
 1. Navigate to the application URL
 2. Wait for page to load
-3. Look for login form elements (username, password fields)
+3. Look for login form elements using CSS selectors (input[name="username"], etc.)
 4. Fill in username with the provided credentials
 5. Fill in password and submit
 
@@ -127,7 +132,7 @@ EXPECTED RESULTS:
 {test_case.get('expectedResults', '')}
 
 Provide detailed technical information about:
-- CSS selectors used
+- CSS selectors used (must be CSS format)
 - Actions performed 
 - Values entered
 - Results observed

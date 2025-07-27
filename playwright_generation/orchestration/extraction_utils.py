@@ -100,20 +100,9 @@ def extract_test_script_from_specialized(response):
         str: Extracted test script or None if not found
     """
     # Look for test script with header
-    matches = re.findall(r'###\s+\w+\.\s+testCase\.js.*?```javascript\s+(.*?)```', response, re.DOTALL)
+    matches = re.findall(r'###\s+\d+\.\s+testCase\.spec\.js.*?```javascript\s+(.*?)```', response, re.DOTALL)
     
-    if matches and len(matches) > 0:
-        test_script = matches[0].strip()
-        print(f"Debug: Found test script with length {len(test_script)}")
-        return test_script
+    if matches:
+        return matches[0].strip()
     
-    # Alternative pattern - look for any script with test function
-    test_blocks = re.findall(r'```javascript\s+(.*?test\(.*?}\);.*?)```', response, re.DOTALL)
-    
-    if test_blocks and len(test_blocks) > 0:
-        test_script = test_blocks[0].strip()
-        print(f"Debug: Found test script with alternative pattern, length {len(test_script)}")
-        return test_script
-    
-    print("Debug: No test script found in the response")
     return None

@@ -44,20 +44,20 @@ class PlaywrightAgentOrchestrator:
         print(f"✅ Saved page objects to {self.pages_dir}")
         print(f"✅ Saved test script to {test_file_path}")
         
-        # Run integration validation
-        validation_result = self.validate_integration(test_case_id)
+        # # Run integration validation
+        # validation_result = self.validate_integration(test_case_id)
         
-        # If validation was successful, run the feedback loop
-        if validation_result["status"] == "success":
-            print("\n🔄 Starting feedback loop to improve code based on critique...")
-            improvement_result = self.improve_from_critique(validation_result["critique_file"])
+        # # If validation was successful, run the feedback loop
+        # if validation_result["status"] == "success":
+        #     print("\n🔄 Starting feedback loop to improve code based on critique...")
+        #     improvement_result = self.improve_from_critique(validation_result["critique_file"])
             
-            if improvement_result["status"] == "success":
-                print("🎉 Feedback loop complete - code has been improved based on critique")
-            else:
-                print("⚠️ Feedback loop encountered issues - some improvements may not have been applied")
-        else:
-            print("⚠️ Integration validation failed - skipping feedback loop")
+        #     if improvement_result["status"] == "success":
+        #         print("🎉 Feedback loop complete - code has been improved based on critique")
+        #     else:
+        #         print("⚠️ Feedback loop encountered issues - some improvements may not have been applied")
+        # else:
+        #     print("⚠️ Integration validation failed - skipping feedback loop")
 
     async def generate_from_selectors(self, test_case_id, test_case, selectors):
         """Generate Page Object Models directly from selectors using LangGraph workflow."""
