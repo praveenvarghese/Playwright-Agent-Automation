@@ -367,15 +367,15 @@ Only provide files that actually need corrections based on the feedback.
         
         check_request = HumanMessage(
             content="""
-Please do a final check on the integration quality of all files above.
+    Please do a final check on the integration quality of all files above.
 
-Are there any remaining integration issues, or is the system ready for production use?
+    Are there any remaining integration issues, or is the system ready for production use?
 
-Respond with either:
-"✅ INTEGRATION_APPROVED - System is ready"
-or
-"❌ INTEGRATION_ISSUES - [specific remaining issues]"
-""",
+    Respond with either:
+    "✅ INTEGRATION_APPROVED - System is ready"
+    or
+    "❌ INTEGRATION_ISSUES - [specific remaining issues]"
+    """,
             name="User"
         )
         
@@ -391,18 +391,38 @@ or
         # Extract final outputs if approved or max iterations reached
         if not needs_improvement or current_iteration >= max_iterations:
             # Try to get corrected files from integration improvements first
-            if state.get("integration_improvements"):
-                page_objects = extract_page_objects_from_specialized(state["integration_improvements"])
-                test_file = extract_test_script_from_specialized(state["integration_improvements"])
-            else:
-                page_objects = []
-                test_file = ""
+            integration_page_objects = extract_page_objects_from_specialized(state.get("integration_improvements", ""))
+            original_page_objects = extract_page_objects_from_specialized(state["improved_pom"])
             
-            # If no integration improvements, fall back to original improved content
-            if not page_objects:
-                page_objects = extract_page_objects_from_specialized(state["improved_pom"])
+            # SMART COMBINE: Use integration files where available, fill gaps with originals
+            if integration_page_objects:
+                # Get the class names from integration improvements
+                integration_classes = set()
+                for obj in integration_page_objects:
+                    import re
+                    match = re.search(r'export class\s+(\w+)', obj)
+                    if match:
+                        integration_classes.add(match.group(1))
+                
+                # Start with integration improvements
+                page_objects = integration_page_objects[:]
+                
+                # Add any missing classes from original
+                for original_obj in original_page_objects:
+                    match = re.search(r'export class\s+(\w+)', original_obj)
+                    if match and match.group(1) not in integration_classes:
+                        page_objects.append(original_obj)
+                        print(f"✅ Preserved {match.group(1)} from original POM")
+            else:
+                # No integration improvements, use all originals
+                page_objects = original_page_objects
+                print("✅ Using all original POM files (no integration changes)")
+            
+            # Handle test file
+            test_file = extract_test_script_from_specialized(state.get("integration_improvements", ""))
             if not test_file:
                 test_file = extract_test_script_from_specialized(state["final_test_script"])
+                print("✅ Using original test script (no integration changes)")
         else:
             page_objects = []
             test_file = ""
@@ -415,7 +435,6 @@ or
             "page_objects": page_objects,
             "test_file": test_file
         }
-
     # Build the workflow graph
     workflow = StateGraph(TestGenerationState)
     

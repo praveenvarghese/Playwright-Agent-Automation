@@ -26,6 +26,11 @@ You MUST verify and flag these critical issues:
    - INCORRECT: // Add assertions here
    - CORRECT: await expect(page.locator(testCase.resultSelector)).toHaveText(testCase.expectedText)
 
+5. FLAG ANY UNNECESSARY WAITS
+   - You MUST NOT generate or allow any call to `waitForSelector`, `waitForElement`, or any explicit waiting code for selectors like `getByRole`, `getByLabel`, `getByText`, etc., unless the test log or testCase object has a separate explicit wait/check step.
+   - INCORRECT: await page.waitForSelector('text=Success') after getByRole('button', { name: 'Save' }).click();
+   - CORRECT: Only add explicit waits if they are present in the testCase steps/log.
+
 ## Other Review Focus Areas
 
 5. DEPENDENCY STRUCTURE

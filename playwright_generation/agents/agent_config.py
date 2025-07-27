@@ -14,6 +14,8 @@ from playwright_generation.agents.agent_prompts import(
     TEST_GENERATOR_PROMPT,
     TEST_CRITIC_PROMPT,
     INTEGRATION_CRITIC_PROMPT,
+    INTEGRATION_IMPROVEMENT_AGENT_PROMPT,
+    INTEGRATION_FRAMEWORK_EXPERT_PROMPT
 )
 
 # Load environment variables
@@ -149,19 +151,7 @@ def create_agents():
     def integration_framework_expert(messages: List[BaseMessage], agent_name: str = "Integration_Framework_Expert") -> AIMessage:
         """Framework expert that analyzes complete system for integration issues."""
         try:
-            system_prompt = """You are a Playwright Framework Expert. Analyze the complete generated Page Object Models and test scripts for integration issues.
-
-    Check for:
-    1. Import/Export mappings - Do imports match actual exports?
-    2. Cross-file dependencies - Are PageObject methods called correctly?
-    3. Selector consistency - Same elements using consistent strategies?
-    4. Method signatures - Do test calls match PageObject parameters?
-    5. ES6 module compliance - Proper module syntax?
-    6. Playwright best practices - Proper locators, waits, assertions?
-
-    Provide specific feedback on what needs to be fixed for perfect integration."""
-
-            conversation = [SystemMessage(content=system_prompt)]
+            conversation = [SystemMessage(content=INTEGRATION_FRAMEWORK_EXPERT_PROMPT)]  # ✅ Use file
             conversation.extend(messages)
             
             response = llm.invoke(conversation)
@@ -181,23 +171,7 @@ def create_agents():
     def integration_improvement_agent(messages: List[BaseMessage], agent_name: str = "Integration_Improvement") -> AIMessage:
         """Specialized agent that fixes cross-file integration issues."""
         try:
-            system_prompt = """You are an Integration Improvement Specialist. Based on framework expert feedback, fix cross-file integration issues.
-
-    Your job:
-    1. Read the integration feedback provided
-    2. Fix the specific issues mentioned
-    3. Ensure all files work together perfectly
-    4. Maintain the same functionality while fixing integration problems
-
-    Provide corrected versions of files that need fixes using the same format:
-    ### FileName.js
-    ```javascript
-    // Fixed implementation
-    ```
-
-    Only provide files that actually need fixes based on the feedback."""
-
-            conversation = [SystemMessage(content=system_prompt)]
+            conversation = [SystemMessage(content=INTEGRATION_IMPROVEMENT_AGENT_PROMPT)]  # ✅ Use file
             conversation.extend(messages)
             
             response = llm.invoke(conversation)
@@ -213,7 +187,6 @@ def create_agents():
                 content=f"Error in integration improvement: {str(e)}",
                 name=agent_name
             )
-    
     # Return only the working v2 message-based agents
     return {
         "pom_generator_v2": pom_generator,
