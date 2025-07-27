@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-POM Test Runner - Uses EXACT same flow as main workflow
-Just runs the first 3 steps: Generate → Critique → Improve POM
+POM + Test Runner - Uses EXACT same flow as main workflow
+Runs 6 steps: POM Generate → POM Critique → POM Improve → Test Generate → Test Critique → Test Improve
+Stops BEFORE integration steps to test basic generation quality
 Uses existing TC-ENV-001_selectors.json file
 """
 
@@ -16,7 +17,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from playwright_generation.agents.agent_config import create_agents
-from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized
+from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized
 
 # Use EXACT same state as main workflow
 class TestGenerationState(TypedDict):
@@ -48,7 +49,7 @@ class TestGenerationState(TypedDict):
     test_file: str
 
 def create_pom_test_workflow():
-    """Create workflow using EXACT same nodes as main workflow, just first 3 steps"""
+    """Create workflow using EXACT same nodes as main workflow, first 6 steps only"""
     
     # Get exact same agents
     agents = create_agents()
@@ -75,10 +76,9 @@ MCP Execution Log (contains actual working Playwright code):
 
 Instructions:
 1. Analyze the selectors to identify logical pages
-2. Create a BasePage.js file with common functionality
-3. Create specific page objects for each logical page
-4. Follow Page Object Model best practices
-5. Format your response with clear file headers and JavaScript code blocks
+2. Create specific page objects for each logical page
+3. Follow Page Object Model best practices
+4. Format your response with clear file headers and JavaScript code blocks
 
 Format each file as:
 ### 1. FileName.js
@@ -164,28 +164,201 @@ Focus on implementing the suggestions from the critique.
         
         updated_messages = current_messages + [response]
         
-        # Extract page objects from the improved response (same as main workflow)
-        page_objects = extract_page_objects_from_specialized(response.content)
+        return {
+            **state,
+            "messages": updated_messages,
+            "improved_pom": response.content
+        }
+
+    def generate_test_node(state: TestGenerationState) -> TestGenerationState:
+        """EXACT COPY from main workflow - Step 4: Generate Test Script with full context"""
+        print("🔍 Step 4: Generating Test Script")
+        
+        test_case_json = json.dumps(state["test_case"], indent=2)
+        
+        test_request = HumanMessage(
+            content=f"""
+Create a Playwright test script using the improved Page Object Models from above.
+
+You must use the following testCase values inside your actual test code.
+
+✅ Correct:
+    await page.goto(testCase.loginUrl);
+    await loginPage.login(testCase.username, testCase.password);
+    await environmentPage.createEnvironment(testCase.environmentName);
+    await expect(page.locator(testCase.resultSelector)).toHaveText(testCase.expectedText);
+
+❌ Incorrect:
+    await page.goto('https://example.com/login');
+    await loginPage.login('admin', 'password');
+    await environmentPage.createEnvironment('My New Environment');
+
+Test Case:
+```json
+{test_case_json}
+```
+
+Requirements:
+1. Do NOT use any hardcoded values. Use fields from `testCase` like:
+   - testCase.loginUrl
+   - testCase.username
+   - testCase.password
+   - testCase.environmentName
+   - testCase.expectedText
+
+2. Use only the values passed in `testCase` for all navigation, inputs, and assertions.
+
+3. Follow best practices:
+   - Arrange → Act → Assert
+   - Use ES6 module imports
+   - Page Objects should only encapsulate selectors and actions
+
+Format the output as:
+### N. testCase.spec.js
+```javascript
+// Implementation here
+```
+""",
+            name="User"
+        )
+        
+        current_messages = state["messages"] + [test_request]
+        
+        # IMPROVED: Test generator can see all POM work and improvements
+        response = agents["test_generator_v2"](current_messages)
+        
+        updated_messages = current_messages + [response]
         
         return {
             **state,
             "messages": updated_messages,
-            "improved_pom": response.content,
-            "page_objects": page_objects  # Add extracted page objects
+            "test_script": response.content
         }
 
-    # Build workflow - EXACT same structure as main workflow
+    def critique_test_node(state: TestGenerationState) -> TestGenerationState:
+        """EXACT COPY from main workflow - Step 5: Critique Test Script with full context"""
+        print("🔍 Step 5: Critiquing Test Script")
+        
+        test_critique_request = HumanMessage(
+            content="""
+Review the test script generated above and suggest improvements.
+
+Focus on:
+1. Reliability and robustness
+2. Wait strategies
+3. Assertion quality
+4. Error handling
+5. Test structure
+6. Proper use of Page Object Models
+7. Adherence to the testCase value requirements
+
+Provide specific code examples for your suggestions.
+""",
+            name="User"
+        )
+        
+        current_messages = state["messages"] + [test_critique_request]
+        
+        # IMPROVED: Critic can see the entire conversation including POM work
+        response = agents["test_critic_v2"](current_messages)
+        
+        updated_messages = current_messages + [response]
+        
+        return {
+            **state,
+            "messages": updated_messages,
+            "test_critique": response.content
+        }
+
+    def improve_test_node(state: TestGenerationState) -> TestGenerationState:
+        """EXACT COPY from main workflow - Step 6: Improve Test Script based on critique"""
+        print("🔍 Step 6: Improving Test Script")
+        
+        test_improvement_request = HumanMessage(
+            content="""
+Based on the test critique provided above, please improve the test script.
+Address the specific issues mentioned while maintaining compatibility with the Page Object Models.
+
+Provide the complete improved implementation as:
+### N. testCase.spec.js
+```javascript
+// Improved Implementation
+```
+
+Ensure all critique points are addressed and the test follows best practices.
+""",
+            name="User"
+        )
+        
+        current_messages = state["messages"] + [test_improvement_request]
+        
+        # IMPROVED: Generator can see entire conversation flow
+        response = agents["test_generator_v2"](current_messages)
+        
+        updated_messages = current_messages + [response]
+        
+        # CUSTOM EXTRACTION LOGIC - Copy from integration_check_node but adapted for 6-step workflow
+        print("🔍 Extracting final outputs with smart fallback logic...")
+        
+        # Extract page objects from improved POM (Step 3 output)
+        page_objects = extract_page_objects_from_specialized(state["improved_pom"])
+        
+        # Try multiple sources for test file extraction (like integration_check_node does)
+        test_file = None
+        
+        # Try 1: Extract from current response (final test script)
+        test_file = extract_test_script_from_specialized(response.content)
+        if test_file:
+            print("✅ Extracted test from final test script response")
+        
+        # Try 2: Fallback to previous test script if current fails
+        if not test_file:
+            test_file = extract_test_script_from_specialized(state.get("test_script", ""))
+            if test_file:
+                print("✅ Extracted test from initial test script as fallback")
+        
+        # Try 3: More flexible extraction - look for any .spec.js file
+        if not test_file:
+            print("🔍 Trying flexible extraction pattern...")
+            import re
+            # More flexible pattern - any spec file, not just testCase.spec.js
+            flexible_matches = re.findall(r'### \d+\. \w+\.spec\.js.*?```javascript\s+(.*?)```', response.content, re.DOTALL)
+            if flexible_matches:
+                test_file = flexible_matches[0].strip()
+                print("✅ Extracted test using flexible pattern")
+        
+        # Debug output
+        if not test_file:
+            print("⚠️ No test file extracted - will save debug info")
+        else:
+            print(f"✅ Successfully extracted test file ({len(test_file)} characters)")
+        
+        return {
+            **state, 
+            "messages": updated_messages,
+            "final_test_script": response.content,
+            "page_objects": page_objects,
+            "test_file": test_file
+        }
+
+    # Build workflow - EXACT same structure as main workflow but only 6 steps
     workflow = StateGraph(TestGenerationState)
     
-    # Add only the first 3 nodes
+    # Add only the first 6 nodes (no integration steps)
     workflow.add_node("generate_pom", generate_pom_node)
     workflow.add_node("critique_pom", critique_pom_node)
     workflow.add_node("improve_pom", improve_pom_node)
+    workflow.add_node("generate_test", generate_test_node)
+    workflow.add_node("critique_test", critique_test_node)
+    workflow.add_node("improve_test", improve_test_node)
     
-    # EXACT same edges as main workflow for first 3 steps
+    # EXACT same edges as main workflow for first 6 steps
     workflow.add_edge("generate_pom", "critique_pom")
     workflow.add_edge("critique_pom", "improve_pom")
-    workflow.add_edge("improve_pom", END)  # Stop here instead of going to generate_test
+    workflow.add_edge("improve_pom", "generate_test")
+    workflow.add_edge("generate_test", "critique_test")
+    workflow.add_edge("critique_test", "improve_test")
+    workflow.add_edge("improve_test", END)  # Stop here instead of going to integration
     
     # Set entry point
     workflow.set_entry_point("generate_pom")
@@ -221,24 +394,43 @@ def save_page_objects(page_objects, output_dir):
     
     return saved_files
 
-async def run_pom_test():
-    """Main test function - uses EXACT same flow as main workflow"""
-    print("🚀 Starting POM Test with EXACT main workflow flow")
+def save_test_script(test_content, output_dir, test_case_id):
+    """Save test script to file"""
+    os.makedirs(output_dir, exist_ok=True)
+    
+    test_file_path = os.path.join(output_dir, f"{test_case_id}.spec.js")
+    with open(test_file_path, 'w', encoding='utf-8') as f:
+        f.write(test_content)
+    
+    print(f"✅ Saved test: {test_file_path}")
+    return test_file_path
+
+async def run_pom_test_workflow():
+    """Main test function - uses EXACT same flow as main workflow for 6 steps"""
+    print("🚀 Starting POM + Test Workflow (6 steps, no integration)")
     
     # Check if output already exists
-    output_dir = "test_output_pom"
-    if os.path.exists(output_dir) and os.listdir(output_dir):
-        print(f"📁 Found existing files in {output_dir}:")
-        for file in os.listdir(output_dir):
+    output_pages_dir = "test_output_pom_test/pages"
+    output_tests_dir = "test_output_pom_test/tests"
+    
+    if os.path.exists(output_pages_dir) and os.listdir(output_pages_dir):
+        print(f"📁 Found existing files in {output_pages_dir}:")
+        for file in os.listdir(output_pages_dir):
             if file.endswith('.js'):
                 print(f"  - {file}")
         
+        if os.path.exists(output_tests_dir) and os.listdir(output_tests_dir):
+            print(f"📁 Found existing files in {output_tests_dir}:")
+            for file in os.listdir(output_tests_dir):
+                if file.endswith('.js'):
+                    print(f"  - {file}")
+        
         response = input("\nReuse existing files? (y/n) [y]: ").strip().lower()
         if response == '' or response == 'y':
-            print("✅ Reusing existing Page Object files")
+            print("✅ Reusing existing POM + Test files")
             return True
         else:
-            print("🔄 Regenerating Page Object files...")
+            print("🔄 Regenerating POM + Test files...")
     
     # Load existing selectors
     selectors_file = "TC-ENV-001_selectors.json"
@@ -276,11 +468,11 @@ async def run_pom_test():
     
     try:
         # Run workflow - EXACT same invoke as main workflow
-        print("▶️ Running EXACT same workflow structure...")
+        print("▶️ Running 6-step POM + Test workflow...")
         final_state = workflow.invoke(initial_state)
         
         # Save conversation history for debugging - EXACT same as main workflow
-        conversation_file = f"debug_TC-ENV-001_conversation.json"
+        conversation_file = f"debug_TC-ENV-001_pom_test_conversation.json"
         with open(conversation_file, "w", encoding="utf-8") as f:
             # Convert messages to serializable format
             messages_data = []
@@ -297,35 +489,48 @@ async def run_pom_test():
         
         # Extract results and save - EXACT same as main workflow
         page_objects = final_state["page_objects"]
+        test_file = final_state["test_file"]
         
         if page_objects:
-            saved_files = save_page_objects(page_objects, output_dir)
-            print(f"🎉 Success! Generated {len(saved_files)} page object files in {output_dir}/")
+            saved_page_files = save_page_objects(page_objects, output_pages_dir)
+            print(f"🎉 Generated {len(saved_page_files)} page object files in {output_pages_dir}/")
         else:
             print("⚠️ Warning: No page objects found")
-            print(f"Page objects found: {len(page_objects)}")
-            
+        
+        if test_file:
+            saved_test_file = save_test_script(test_file, output_tests_dir, "TC-ENV-001")
+            print(f"🎉 Generated test file: {saved_test_file}")
+        else:
+            print("⚠️ Warning: No test file found")
+        
+        if not page_objects or not test_file:
             # Save raw responses for debugging
-            with open("debug_pom_response.txt", "w", encoding="utf-8") as f:
+            with open("debug_pom_test_response.txt", "w", encoding="utf-8") as f:
                 f.write("=== POM Response ===\n")
                 f.write(final_state["pom_response"])
                 f.write("\n\n=== POM Critique ===\n") 
                 f.write(final_state["pom_critique"])
                 f.write("\n\n=== Improved POM ===\n")
                 f.write(final_state["improved_pom"])
+                f.write("\n\n=== Test Script ===\n")
+                f.write(final_state["test_script"])
+                f.write("\n\n=== Test Critique ===\n")
+                f.write(final_state["test_critique"])
+                f.write("\n\n=== Final Test Script ===\n")
+                f.write(final_state["final_test_script"])
             
-            print("📝 Saved debug info to debug_pom_response.txt")
+            print("📝 Saved debug info to debug_pom_test_response.txt")
         
-        print(f"✅ Successfully completed POM generation for TC-ENV-001 with exact main workflow structure")
+        print(f"✅ Successfully completed POM + Test generation (6 steps) for TC-ENV-001")
         return True
         
     except Exception as e:
-        print(f"❌ Error in POM test workflow: {str(e)}")
+        print(f"❌ Error in POM + Test workflow: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
 
 if __name__ == "__main__":
     import asyncio
-    success = asyncio.run(run_pom_test())
+    success = asyncio.run(run_pom_test_workflow())
     sys.exit(0 if success else 1)

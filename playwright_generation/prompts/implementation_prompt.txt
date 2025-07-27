@@ -14,9 +14,10 @@ Selectors:
 ```
 
 Implement:
-1. A BasePage.js file with common functionality
-2. All necessary Page Object files following the design
-3. A test script that uses these Page Objects
+Instructions:
+1. Analyze the selectors to identify logical pages
+2. Create page objects that directly store the page instance (no BasePage needed)
+3. Each page class should have: constructor(page) { this.page = page; }
 
 IMPORTANT REQUIREMENTS:
 
