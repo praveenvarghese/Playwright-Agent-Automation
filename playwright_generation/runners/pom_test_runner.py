@@ -17,7 +17,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from playwright_generation.agents.agent_config import create_agents
-from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized
+from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized, load_mcp_execution_log
 
 # Use EXACT same state as main workflow
 class TestGenerationState(TypedDict):
@@ -236,21 +236,31 @@ Format the output as:
         }
 
     def critique_test_node(state: TestGenerationState) -> TestGenerationState:
-        """EXACT COPY from main workflow - Step 5: Critique Test Script with full context"""
+        """Step 5: Critique Test Script with full context + MCP data"""
         print("🔍 Step 5: Critiquing Test Script")
         
+        # Load MCP data
+        mcp_log = load_mcp_execution_log(state["test_case_id"])
+        
         test_critique_request = HumanMessage(
-            content="""
+            content=f"""
 Review the test script generated above and suggest improvements.
 
+MCP Execution Log:
+```json
+{json.dumps(mcp_log, indent=2) if mcp_log else "No MCP log found"}
+```
+
 Focus on:
-1. Reliability and robustness
-2. Wait strategies
-3. Assertion quality
-4. Error handling
-5. Test structure
-6. Proper use of Page Object Models
-7. Adherence to the testCase value requirements
+1. Replace placeholder selectors with real ones from MCP log
+2. Replace fake success messages with real verification from MCP final state
+3. Reliability and robustness
+4. Wait strategies
+5. Assertion quality
+6. Error handling
+7. Test structure
+8. Proper use of Page Object Models
+9. Adherence to the testCase value requirements
 
 Provide specific code examples for your suggestions.
 """,

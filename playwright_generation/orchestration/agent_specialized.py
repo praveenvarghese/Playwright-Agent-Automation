@@ -9,7 +9,7 @@ from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from playwright_generation.agents.agent_config import create_agents
-from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized
+from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized, load_mcp_execution_log
 from langgraph.graph import StateGraph, END, START
 
 # IMPROVED: State now includes message history
@@ -233,18 +233,28 @@ Format the output as:
         """Step 5: Critique Test Script with full context"""
         print("🔍 Step 5: Critiquing Test Script")
         
+        # Load MCP data
+        mcp_log = load_mcp_execution_log(state["test_case_id"])
+        
         test_critique_request = HumanMessage(
-            content="""
+            content=f"""
 Review the test script generated above and suggest improvements.
 
+MCP Execution Log:
+```json
+{json.dumps(mcp_log, indent=2) if mcp_log else "No MCP log found"}
+```
+
 Focus on:
-1. Reliability and robustness
-2. Wait strategies
-3. Assertion quality
-4. Error handling
-5. Test structure
-6. Proper use of Page Object Models
-7. Adherence to the testCase value requirements
+1. Replace placeholder selectors with real ones from MCP log
+2. Replace fake success messages with real verification from MCP final state
+3. Reliability and robustness
+4. Wait strategies
+5. Assertion quality
+6. Error handling
+7. Test structure
+8. Proper use of Page Object Models
+9. Adherence to the testCase value requirements
 
 Provide specific code examples for your suggestions.
 """,
@@ -263,7 +273,7 @@ Provide specific code examples for your suggestions.
             "messages": updated_messages,
             "test_critique": response.content
         }
-
+    
     def improve_test_node(state: TestGenerationState) -> TestGenerationState:
         """Step 6: Improve Test Script based on critique"""
         print("🔍 Step 6: Improving Test Script")
@@ -367,15 +377,15 @@ Only provide files that actually need corrections based on the feedback.
         
         check_request = HumanMessage(
             content="""
-    Please do a final check on the integration quality of all files above.
+Please do a final check on the integration quality of all files above.
 
-    Are there any remaining integration issues, or is the system ready for production use?
+Are there any remaining integration issues, or is the system ready for production use?
 
-    Respond with either:
-    "✅ INTEGRATION_APPROVED - System is ready"
-    or
-    "❌ INTEGRATION_ISSUES - [specific remaining issues]"
-    """,
+Respond with either:
+"✅ INTEGRATION_APPROVED - System is ready"
+or
+"❌ INTEGRATION_ISSUES - [specific remaining issues]"
+""",
             name="User"
         )
         
@@ -391,38 +401,18 @@ Only provide files that actually need corrections based on the feedback.
         # Extract final outputs if approved or max iterations reached
         if not needs_improvement or current_iteration >= max_iterations:
             # Try to get corrected files from integration improvements first
-            integration_page_objects = extract_page_objects_from_specialized(state.get("integration_improvements", ""))
-            original_page_objects = extract_page_objects_from_specialized(state["improved_pom"])
-            
-            # SMART COMBINE: Use integration files where available, fill gaps with originals
-            if integration_page_objects:
-                # Get the class names from integration improvements
-                integration_classes = set()
-                for obj in integration_page_objects:
-                    import re
-                    match = re.search(r'export class\s+(\w+)', obj)
-                    if match:
-                        integration_classes.add(match.group(1))
-                
-                # Start with integration improvements
-                page_objects = integration_page_objects[:]
-                
-                # Add any missing classes from original
-                for original_obj in original_page_objects:
-                    match = re.search(r'export class\s+(\w+)', original_obj)
-                    if match and match.group(1) not in integration_classes:
-                        page_objects.append(original_obj)
-                        print(f"✅ Preserved {match.group(1)} from original POM")
+            if state.get("integration_improvements"):
+                page_objects = extract_page_objects_from_specialized(state["integration_improvements"])
+                test_file = extract_test_script_from_specialized(state["integration_improvements"])
             else:
-                # No integration improvements, use all originals
-                page_objects = original_page_objects
-                print("✅ Using all original POM files (no integration changes)")
+                page_objects = []
+                test_file = ""
             
-            # Handle test file
-            test_file = extract_test_script_from_specialized(state.get("integration_improvements", ""))
+            # If no integration improvements, fall back to original improved content
+            if not page_objects:
+                page_objects = extract_page_objects_from_specialized(state["improved_pom"])
             if not test_file:
                 test_file = extract_test_script_from_specialized(state["final_test_script"])
-                print("✅ Using original test script (no integration changes)")
         else:
             page_objects = []
             test_file = ""
@@ -435,6 +425,7 @@ Only provide files that actually need corrections based on the feedback.
             "page_objects": page_objects,
             "test_file": test_file
         }
+
     # Build the workflow graph
     workflow = StateGraph(TestGenerationState)
     
@@ -445,9 +436,9 @@ Only provide files that actually need corrections based on the feedback.
     workflow.add_node("generate_test", generate_test_node)
     workflow.add_node("critique_test", critique_test_node)
     workflow.add_node("improve_test", improve_test_node)
-    workflow.add_node("integration_review", integration_review_node)
-    workflow.add_node("integration_improvement", integration_improvement_node) 
-    workflow.add_node("integration_check", integration_check_node)
+    # workflow.add_node("integration_review", integration_review_node)
+    # workflow.add_node("integration_improvement", integration_improvement_node) 
+    # workflow.add_node("integration_check", integration_check_node)
     
     # FIXED: Correct edge sequence
     workflow.add_edge("generate_pom", "critique_pom")
@@ -456,18 +447,18 @@ Only provide files that actually need corrections based on the feedback.
     workflow.add_edge("generate_test", "critique_test")
     workflow.add_edge("critique_test", "improve_test")
     workflow.add_edge("improve_test", "integration_review")
-    workflow.add_edge("integration_review", "integration_improvement")
-    workflow.add_edge("integration_improvement", "integration_check")
+    # workflow.add_edge("integration_review", "integration_improvement")
+    # workflow.add_edge("integration_improvement", "integration_check")
     
     # FIXED: Conditional edge for iteration loop
-    workflow.add_conditional_edges(
-        "integration_check",
-        lambda state: "improve_more" if state.get("needs_integration_improvement", False) else "done",
-        {
-            "improve_more": "integration_improvement",
-            "done": END
-        }
-    )
+    # workflow.add_conditional_edges(
+    #     "integration_check",
+    #     lambda state: "improve_more" if state.get("needs_integration_improvement", False) else "done",
+    #     {
+    #         "improve_more": "integration_improvement",
+    #         "done": END
+    #     }
+    # )
     
     # Set entry point
     workflow.set_entry_point("generate_pom")

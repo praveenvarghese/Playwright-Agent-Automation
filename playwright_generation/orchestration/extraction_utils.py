@@ -5,6 +5,8 @@ from different response formats.
 """
 
 import re
+import os
+import json
 from playwright_generation.common.utils import extract_code_blocks
 
 def extract_page_objects_from_coordinator(chat_history):
@@ -106,3 +108,11 @@ def extract_test_script_from_specialized(response):
         return matches[0].strip()
     
     return None
+
+def load_mcp_execution_log(test_case_id):
+    """Load MCP execution log if it exists"""
+    mcp_file = f"{test_case_id}_mcp_execution_log.json"
+    if os.path.exists(mcp_file):
+        with open(mcp_file, 'r') as f:
+            return json.load(f)
+    return []
