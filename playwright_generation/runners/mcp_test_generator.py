@@ -11,6 +11,7 @@ import sys
 import warnings
 from openai import AzureOpenAI
 from dotenv import load_dotenv
+import logging
 
 # Suppress warnings early
 warnings.filterwarnings("ignore", category=ResourceWarning)
@@ -113,10 +114,9 @@ CONTEXT:
 - Username: {os.getenv('APP_USERNAME')}
 - Password: {os.getenv('APP_PASSWORD')}
 
-🚨 CRITICAL: Use CSS selectors ONLY for all interactions:
-- Examples: #username, input[name="password"], button[type="submit"]
-- DO NOT use getByRole, getByText, getByLabel, or other Playwright locator methods
-- Use traditional CSS selectors like .class, #id, [attribute="value"]
+🚨  CRITICAL: Use Playwright locator methods for all interactions:
+- Use getByRole, getByText, getByLabel methods
+- Look at the page snapshot to identify the correct element names
 
 PREREQUISITE STEPS:
 1. Navigate to the application URL
@@ -235,60 +235,43 @@ Continue until all test steps are completed or you encounter an error.
     return execution_log
 
 def extract_selectors(execution_log):
-    """Extract REAL Playwright locators from MCP execution log"""
+    """Simple, universal selector extraction using LLM"""
     selectors = []
     
-    for i, entry in enumerate(execution_log):
+    for entry in execution_log:
         tool = entry["tool"]
         args = entry["args"]
         result = entry.get("result", {})
         
-        # Extract the working Playwright locator from MCP response
-        playwright_locator = extract_playwright_locator(result)
-        element_name = args.get("element", "")
-        
         if tool == "browser_navigate":
             selectors.append({
-                "action": "navigate",
-                "tag": "page", 
-                "text": f"Navigate to {args.get('url', '')}",
-                "selector": "",
+                "action": "navigate", 
                 "url": args.get('url', '')
             })
             
-        elif tool == "browser_type":
-            input_text = args.get("text", "")
-            selectors.append({
-                "action": "input",
-                "tag": "input",
-                "text": f"⌨️ Input {input_text} into {element_name}",
-                "selector": playwright_locator,  # REAL locator from MCP
-                "input_value": input_text,
-                "element_name": element_name
-            })
+        elif tool in ["browser_type", "browser_click"]:
+            # Extract raw playwright code
+            playwright_code = extract_playwright_code(result)
             
-        elif tool == "browser_click":
-            selectors.append({
-                "action": "click", 
-                "tag": "button",
-                "text": f"🖱️ Click {element_name}",
-                "selector": playwright_locator,  # REAL locator from MCP
-                "element_name": element_name
-            })
+            if playwright_code:
+                # Let LLM parse it into clean format
+                parsed_action = llm_parse_action(tool, playwright_code, args)
+                if parsed_action:
+                    selectors.append(parsed_action)
+                else:
+                    # Fallback if LLM parsing fails
+                    selectors.append({
+                        "action": "input" if tool == "browser_type" else "click",
+                        "rawSelector": playwright_code,
+                        "elementName": args.get("element", ""),
+                        "value": args.get("text", "") if tool == "browser_type" else None
+                    })
     
     return selectors
 
-def extract_playwright_locator(result):
-    """
-    Extract Playwright locator from MCP tool response.
-    
-    Input: MCP result containing text like:
-    "await page.getByRole('textbox', { name: 'Username' }).fill('admin');"
-    
-    Output: "getByRole('textbox', { name: 'Username' })"
-    """
+def extract_playwright_code(result):
+    """Extract Playwright locator from MCP result"""
     try:
-        # Get the text content from MCP response
         if not isinstance(result, dict) or "content" not in result:
             return None
             
@@ -296,29 +279,125 @@ def extract_playwright_locator(result):
             if isinstance(content_item, dict) and "text" in content_item:
                 text = content_item["text"]
                 
-                # Look for Playwright code lines
+                # Look for lines that start with "await page."
                 lines = text.split('\n')
                 for line in lines:
                     clean_line = line.strip()
                     if clean_line.startswith('await page.'):
-                        # Extract locator part from line like:
-                        # "await page.getByRole('textbox', { name: 'Username' }).fill('admin');"
-                        
+                        # Extract just the locator part, not the full line
                         import re
-                        # Pattern: await page.LOCATOR.ACTION(...)
-                        pattern = r"await page\.(.+?)\.(fill|click|press|selectOption|check|clear|goto)"
+                        pattern = r"await page\.(getBy\w+\([^)]+\))\.(\w+)\("
                         match = re.search(pattern, clean_line)
                         
                         if match:
                             locator_part = match.group(1)
-                            print(f"✅ Extracted locator: {locator_part}")
-                            return locator_part
-                            
+                            return locator_part  # Return just "getByRole('textbox', { name: 'Username' })"
+                        
+                        return clean_line  # Fallback to full line
+                        
     except Exception as e:
-        print(f"⚠️ Error extracting Playwright locator: {e}")
+        logging.warning(f"Error extracting Playwright code: {e}")
         
     return None
 
+def llm_parse_action(tool, playwright_code, args):
+    """Use LLM to parse any Playwright selector into clean format"""
+    
+    # Initialize Azure OpenAI client
+    client = AzureOpenAI(
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+    )
+    
+    # IMPROVED prompt based on other LLM's feedback
+    prompt = f"""
+You are an expert at extracting UI actions and selectors from Playwright automation logs.
+
+Given:
+- Tool: {tool}
+- Playwright code: {playwright_code}
+- Args: {json.dumps(args)}
+
+**Requirements:**
+1. ALWAYS extract and include a "target" object that describes the selector:
+    - If getByRole: "target": {{ "type": "role", "role": "<role>", "name": "<name>" }}
+    - If getByText: "target": {{ "type": "text", "text": "<text>" }}
+    - If getByLabel: "target": {{ "type": "label", "label": "<label>" }}
+    - If generic CSS: "target": {{ "type": "css", "selector": "<css-selector>" }}
+    - If other/fallback: "target": {{ "type": "<other-type>", ... }}
+2. ALWAYS include a "rawSelector" field with the exact Playwright locator string.
+3. For input actions: include "value".
+4. For click actions: DO NOT include a "value" field.
+5. ALWAYS include an "elementName" field for human readability.
+6. Output ONLY the JSON object, with ALL required fields.
+
+**EXAMPLES:**
+
+- Input with getByRole:
+{{
+  "action": "input",
+  "target": {{ "type": "role", "role": "textbox", "name": "Username" }},
+  "value": "admin",
+  "rawSelector": "getByRole('textbox', {{ name: 'Username' }})",
+  "elementName": "Username input"
+}}
+
+- Click with getByText:
+{{
+  "action": "click",
+  "target": {{ "type": "text", "text": "Login" }},
+  "rawSelector": "getByText('Login')",
+  "elementName": "Login button"
+}}
+
+- Input with getByLabel:
+{{
+  "action": "input",
+  "target": {{ "type": "label", "label": "Password" }},
+  "value": "secret",
+  "rawSelector": "getByLabel('Password')",
+  "elementName": "Password input"
+}}
+
+- Fallback for unknown selector:
+{{
+  "action": "click",
+  "target": {{ "type": "css", "selector": "#main > button.primary" }},
+  "rawSelector": "#main > button.primary",
+  "elementName": "Primary button"
+}}
+
+**INSTRUCTIONS:**
+- Parse the Playwright code and extract a JSON object matching the above requirements and style. Do not return explanations—only the JSON object.
+"""
+    
+    try:
+        response = client.chat.completions.create(
+            model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=500
+        )
+        
+        result_text = response.choices[0].message.content.strip()
+        
+        # Parse the JSON response
+        parsed_result = json.loads(result_text)
+        
+        # Add the value for input actions if not present
+        if tool == "browser_type" and "value" not in parsed_result:
+            parsed_result["value"] = args.get("text", "")
+        
+        return parsed_result
+        
+    except json.JSONDecodeError as e:
+        logging.error(f"Failed to parse LLM JSON response: {result_text}. Error: {e}")
+        return None
+    except Exception as e:
+        logging.error(f"LLM parsing failed: {e}")
+        return None
+      
 async def generate_page_objects(test_case_id, test_case, selectors, output_dir):
     """Generate Page Objects using existing orchestrator"""
     try:
