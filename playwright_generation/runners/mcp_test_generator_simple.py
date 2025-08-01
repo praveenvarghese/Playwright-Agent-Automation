@@ -51,17 +51,70 @@ class TestGenerationState(TypedDict):
 # =============================================================================
 
 async def fetch_test_case(test_case_id):
-    """Fetch test case from vector database"""
-    try:
-        print(f"📚 Fetching test case {test_case_id}")
-        test_case = await fetch_test_case_by_id(test_case_id)
-        if test_case:
-            print(f"✅ Found: {test_case.get('title', 'Unknown')}")
-        return test_case
-    except Exception as e:
-        print(f"❌ Error fetching test case: {e}")
-        return None
-
+    """Fetch test case from vector database OR file based on env variable"""
+    source = os.getenv("TEST_CASE_SOURCE", "vector").lower()
+    
+    if source == "file":
+        print(f"📄 Loading test case from file: {test_case_id}")
+        try:
+            with open(test_case_id, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+            
+            test_case = {
+                'id': 'TC-FILE-001',
+                'title': '',
+                'steps': '',
+                'expectedResults': ''
+            }
+            
+            lines = content.split('\n')
+            current_section = None
+            
+            for line in lines:
+                line = line.strip()
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    
+                    if key == 'id':
+                        test_case['id'] = value
+                    elif key == 'title':
+                        test_case['title'] = value
+                        current_section = None
+                    elif key == 'steps':
+                        current_section = 'steps'
+                        test_case['steps'] = value if value else ''
+                    elif key == 'expected':
+                        current_section = 'expectedResults'
+                        test_case['expectedResults'] = value if value else ''
+                elif current_section and line:
+                    if test_case[current_section]:
+                        test_case[current_section] += '\n' + line
+                    else:
+                        test_case[current_section] = line
+            
+            print(f"✅ Loaded from file: {test_case.get('title', 'Unknown')}")
+            return test_case
+            
+        except FileNotFoundError:
+            print(f"❌ File not found: {test_case_id}")
+            return None
+        except Exception as e:
+            print(f"❌ Error loading file: {e}")
+            return None
+    
+    else:
+        try:
+            print(f"🔍 Searching for test case ID: {test_case_id}")
+            test_case = await fetch_test_case_by_id(test_case_id)
+            if test_case:
+                print(f"✅ Found: {test_case.get('title', 'Unknown')}")
+            return test_case
+        except Exception as e:
+            print(f"❌ Azure Search error: {str(e)}")
+            return None
+        
 async def run_mcp_automation(test_case_id, test_case):
     """Run MCP automation using proven approach"""
     manager = WorkingMCPManager()
@@ -616,7 +669,8 @@ async def generate_complete_test(test_case_id: str, output_dir: str = "complete_
         print("❌ Test case not found")
         return False
     print(f"✅ Found: {test_case.get('title', 'Unknown')}")
-        
+    test_case_id = test_case['id']
+    
     # Step 2: Run MCP automation  
     print("🎭 Running MCP automation...")
     execution_log = await run_mcp_automation(test_case_id, test_case)

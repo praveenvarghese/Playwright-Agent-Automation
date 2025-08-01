@@ -4,14 +4,14 @@ An AI-powered tool that automatically generates Playwright Page Object Models an
 
 ## Overview
 
-This tool combines MCP browser automation with AI agents to create complete Playwright test suites. It fetches test cases from Azure Vector Search, executes them using MCP automation to capture real browser interactions, then uses a 6-step AI workflow to generate production-ready Page Object Models and test scripts.
+This tool combines MCP browser automation with AI agents to create complete Playwright test suites. It can fetch test cases from Azure Vector Search or load them from local text files, executes them using MCP automation to capture real browser interactions, then uses a 6-step AI workflow to generate production-ready Page Object Models and test scripts.
 
 ## Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Azure Vector  │    │  MCP Playwright │    │   6-Step AI     │
-│     Search      │───▶│   Automation    │───▶│   Workflow      │
+│   Search / File │───▶│   Automation    │───▶│   Workflow      │
 │  (Test Cases)   │    │ (Real Browser)  │    │ (POM + Tests)   │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
@@ -51,10 +51,14 @@ AZURE_OPENAI_API_KEY=your_api_key
 AZURE_OPENAI_DEPLOYMENT_NAME=your_deployment_name
 AZURE_OPENAI_API_VERSION=2024-02-15-preview
 
-# Azure Search Configuration
+# Azure Search Configuration (only required for vector mode)
 AZURE_SEARCH_ENDPOINT=your_search_endpoint
 AZURE_SEARCH_KEY=your_search_key
 AZURE_SEARCH_INDEX_NAME=your_index_name
+
+# Test Case Source Configuration
+# Options: vector (Azure Vector Search) or file (local text files)
+TEST_CASE_SOURCE=vector
 
 # Application Under Test
 APP_URL=your_application_url
@@ -81,25 +85,99 @@ pip install python-dotenv
 
 ## Usage
 
-### Basic Usage
+### Vector Database Mode (Default)
 
-Generate a complete test suite for a specific test case:
+Set your `.env` file:
+
+```env
+TEST_CASE_SOURCE=vector
+```
+
+Generate a complete test suite for a specific test case from Azure Vector Search:
 
 ```bash
-python playwright_generation\runners\mcp_test_generator_simple.py TC-ENV-001
+python playwright_generation\runners\mcp_test_generator_simple.py TC-SAMPLE-001
+```
+
+### File-Based Mode
+
+Set your `.env` file:
+
+```env
+TEST_CASE_SOURCE=file
+```
+
+Create a test case file with the following format:
+
+**Example: `my_test.txt`**
+
+```
+Title: Sample Test Case Title
+Steps:
+1. Navigate to the application login page.
+2. Enter valid credentials and login.
+3. Navigate to the target feature.
+4. Perform the required action.
+5. Verify the expected result is displayed.
+Expected:
+The action is completed successfully and the expected result is visible.
+```
+
+**Optional ID field** (if not specified, defaults to 'TC-FILE-001'):
+
+```
+ID: TC-SAMPLE-001
+Title: Sample Test Case Title
+Steps:
+1. Navigate to the application login page.
+2. Enter valid credentials and login.
+3. Navigate to the target feature.
+4. Perform the required action.
+5. Verify the expected result is displayed.
+Expected:
+The action is completed successfully and the expected result is visible.
+```
+
+Then run:
+
+```bash
+python playwright_generation\runners\mcp_test_generator_simple.py my_test.txt
 ```
 
 ### With Custom Output Directory
 
 ```bash
-python playwright_generation\runners\mcp_test_generator_simple.py TC-ENV-001 my_custom_output
+python playwright_generation\runners\mcp_test_generator_simple.py TC-SAMPLE-001 my_custom_output
+# or
+python playwright_generation\runners\mcp_test_generator_simple.py my_test.txt my_custom_output
 ```
+
+## Test Case File Format
+
+When using `TEST_CASE_SOURCE=file`, create text files with the following structure:
+
+```
+Title: Your test case title
+Steps:
+1. First step description
+2. Second step description
+3. Third step description
+Expected:
+Expected results description
+```
+
+**Optional fields:**
+
+- `ID: your-custom-id` - If not provided, defaults to 'TC-FILE-001'
+
+**Supported file extensions:** Any text file (.txt, .md, etc.)
 
 ## Workflow Steps
 
 ### 1. Test Case Retrieval
 
-- Fetches test case from Azure Vector Search by ID
+- **Vector Mode**: Fetches test case from Azure Vector Search by ID
+- **File Mode**: Loads test case from local text file and parses content
 - Retrieves test steps, expected results, and metadata
 
 ### 2. MCP Automation
@@ -130,13 +208,15 @@ python playwright_generation\runners\mcp_test_generator_simple.py TC-ENV-001 my_
 complete_tests/
 ├── pages/
 │   ├── LoginPage.js                    # Login page object
-│   ├── EnvironmentPage.js              # Environment management page object
+│   ├── FeaturePage.js                  # Feature-specific page object
 │   └── BasePage.js                     # Common page functionality
 ├── tests/
-│   └── TC-ENV-001.spec.js              # Complete test script
-├── TC-ENV-001_selectors.json           # Extracted selectors
-└── TC-ENV-001_mcp_execution_log.json   # MCP automation log
+│   └── TC-SAMPLE-001.spec.js           # Complete test script (named using ID from test case)
+├── TC-SAMPLE-001_selectors.json        # Extracted selectors
+└── TC-SAMPLE-001_mcp_execution_log.json # MCP automation log
 ```
+
+**Note**: Output files are named using the ID from the test case content, not the input filename.
 
 ## Generated Code Features
 
@@ -239,24 +319,30 @@ System prompts are stored in `prompts/` directory:
 - Check that port 3000 is available
 - Ensure Playwright browsers are installed
 
-**Azure connection errors:**
+**Azure connection errors (Vector mode only):**
 
 - Verify all Azure credentials in .env file
 - Check network connectivity to Azure services
 - Validate API keys and endpoints
 
+**File not found errors (File mode):**
+
+- Ensure the test case file exists in the current working directory
+- Check file path and extension
+- Verify file permissions
+
 **Empty output files:**
 
 - Check MCP execution log for errors
-- Verify test case exists in Azure Vector Search
+- Verify test case format (for file mode) or existence (for vector mode)
 - Review agent responses for parsing issues
 
 ### Debug Mode
 
 Enable debug logging by checking the generated files:
 
-- `TC-XXX-XXX_mcp_execution_log.json` - MCP automation details
-- `TC-XXX-XXX_selectors.json` - Extracted selectors
+- `{ID}_mcp_execution_log.json` - MCP automation details
+- `{ID}_selectors.json` - Extracted selectors
 - Console output for step-by-step progress
 
 ## Contributing
@@ -266,5 +352,5 @@ When modifying the codebase:
 1. Keep the 6-step workflow intact
 2. Maintain ES6 module compatibility
 3. Preserve parameterized test patterns
-4. Test with real Azure Vector Search data
+4. Test with both vector and file-based modes
 5. Validate generated code syntax
