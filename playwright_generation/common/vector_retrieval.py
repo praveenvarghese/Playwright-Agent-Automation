@@ -1,10 +1,8 @@
-# vector_retrieval.py
 import os
 from dotenv import load_dotenv
 from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
 
-# Load environment variables
 def get_search_client():
     """Returns an authenticated Azure Cognitive Search client."""
     dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -38,7 +36,7 @@ async def fetch_test_case_by_id(test_case_id):
 
     try:
         results = client.search(
-            search_text="",  # empty = use filter only
+            search_text="",
             filter=f"id eq '{test_case_id}'",
             select=["*"]
         )

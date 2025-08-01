@@ -1,6 +1,5 @@
 """
 Agent configuration for AI-enhanced Playwright test generation.
-CLEANED: Removed unused agents, kept only the 4 agents actually used by the working runner.
 """
 
 import os
@@ -15,7 +14,6 @@ from playwright_generation.agents.agent_prompts import(
     TEST_CRITIC_PROMPT
 )
 
-# Load environment variables
 load_dotenv()
 
 def get_langchain_llm():
@@ -30,14 +28,13 @@ def get_langchain_llm():
     )
 
 def create_agents():
-    """Create and configure only the agents needed for the 6-step workflow."""
+    """Create and configure agents for the 6-step workflow."""
     
     llm = get_langchain_llm()
     
     def pom_generator(messages: List[BaseMessage], agent_name: str = "POM_Generator") -> AIMessage:
         """Generate Page Object Models based on conversation history."""
         try:
-            # Build conversation with system prompt
             conversation = [SystemMessage(content=POM_GENERATOR_PROMPT)]
             conversation.extend(messages)
             
@@ -125,7 +122,6 @@ def create_agents():
                 name=agent_name
             )
     
-    # Return only the 4 agents actually used by the working runner
     return {
         "pom_generator_v2": pom_generator,
         "pom_critic_v2": pom_critic,
@@ -138,7 +134,6 @@ def test_agents():
     try:
         agents = create_agents()
         
-        # Test message-based agents
         test_messages = [
             HumanMessage(content="Create a simple LoginPage class with username and password fields.")
         ]
@@ -148,7 +143,6 @@ def test_agents():
         print(f"Sample output length: {len(result.content)} characters")
         print(f"Agent name: {result.name}")
         
-        # Test that critic can see generator's work
         messages_with_context = test_messages + [result]
         critique = agents["pom_critic_v2"](messages_with_context)
         print("✅ POM Critic can see generator's work")
@@ -162,7 +156,7 @@ def test_agents():
 
 if __name__ == "__main__":
     """Test the agents when running this file directly."""
-    print("Testing cleaned agent configuration...")
+    print("Testing agent configuration...")
     success = test_agents()
     if success:
         print("✅ All agents configured successfully!")

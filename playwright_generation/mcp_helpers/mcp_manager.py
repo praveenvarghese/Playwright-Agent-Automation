@@ -3,7 +3,6 @@ import json
 import warnings
 import sys
 
-# Suppress Windows asyncio warnings
 warnings.filterwarnings("ignore", category=ResourceWarning)
 warnings.filterwarnings("ignore", message=".*unclosed transport.*")
 warnings.filterwarnings("ignore", message=".*I/O operation on closed pipe.*")
@@ -12,7 +11,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 class WorkingMCPManager:
-    """MCP Manager based on your working POC"""
+    """MCP Manager for Playwright server communication"""
     
     def __init__(self):
         self.process = None
@@ -32,14 +31,12 @@ class WorkingMCPManager:
         
         await asyncio.sleep(2)
         
-        # Initialize
         await self._send_request("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
             "clientInfo": {"name": "test-executor", "version": "1.0.0"}
         })
         
-        # Get tools
         response = await self._send_request("tools/list")
         if response and "result" in response:
             self.available_tools = response["result"].get("tools", [])
