@@ -1,6 +1,6 @@
 """
 Agent configuration for AI-enhanced Playwright test generation.
-CLEANED: Removed legacy agents, kept only working v2 message-based agents.
+CLEANED: Removed unused agents, kept only the 4 agents actually used by the working runner.
 """
 
 import os
@@ -12,10 +12,7 @@ from playwright_generation.agents.agent_prompts import(
     POM_GENERATOR_PROMPT,
     POM_CRITIC_PROMPT,
     TEST_GENERATOR_PROMPT,
-    TEST_CRITIC_PROMPT,
-    INTEGRATION_CRITIC_PROMPT,
-    INTEGRATION_IMPROVEMENT_AGENT_PROMPT,
-    INTEGRATION_FRAMEWORK_EXPERT_PROMPT
+    TEST_CRITIC_PROMPT
 )
 
 # Load environment variables
@@ -33,7 +30,7 @@ def get_langchain_llm():
     )
 
 def create_agents():
-    """Create and configure all agents needed for Playwright test generation."""
+    """Create and configure only the agents needed for the 6-step workflow."""
     
     llm = get_langchain_llm()
     
@@ -128,74 +125,12 @@ def create_agents():
                 name=agent_name
             )
     
-    def integration_critic(messages: List[BaseMessage], agent_name: str = "Integration_Critic") -> AIMessage:
-        """Provide integration critique with full conversation context."""
-        try:
-            conversation = [SystemMessage(content=INTEGRATION_CRITIC_PROMPT)]
-            conversation.extend(messages)
-            
-            response = llm.invoke(conversation)
-            
-            return AIMessage(
-                content=response.content,
-                name=agent_name,
-                additional_kwargs={"agent_type": "integration_critic"}
-            )
-        except Exception as e:
-            print(f"Error in Integration Critic: {str(e)}")
-            return AIMessage(
-                content=f"Error in integration critique: {str(e)}",
-                name=agent_name
-            )
-
-    def integration_framework_expert(messages: List[BaseMessage], agent_name: str = "Integration_Framework_Expert") -> AIMessage:
-        """Framework expert that analyzes complete system for integration issues."""
-        try:
-            conversation = [SystemMessage(content=INTEGRATION_FRAMEWORK_EXPERT_PROMPT)]  # ✅ Use file
-            conversation.extend(messages)
-            
-            response = llm.invoke(conversation)
-            
-            return AIMessage(
-                content=response.content,
-                name=agent_name,
-                additional_kwargs={"agent_type": "integration_expert"}
-            )
-        except Exception as e:
-            print(f"Error in Integration Framework Expert: {str(e)}")
-            return AIMessage(
-                content=f"Error in framework analysis: {str(e)}",
-                name=agent_name
-            )
-
-    def integration_improvement_agent(messages: List[BaseMessage], agent_name: str = "Integration_Improvement") -> AIMessage:
-        """Specialized agent that fixes cross-file integration issues."""
-        try:
-            conversation = [SystemMessage(content=INTEGRATION_IMPROVEMENT_AGENT_PROMPT)]  # ✅ Use file
-            conversation.extend(messages)
-            
-            response = llm.invoke(conversation)
-            
-            return AIMessage(
-                content=response.content,
-                name=agent_name,
-                additional_kwargs={"agent_type": "integration_improvement"}
-            )
-        except Exception as e:
-            print(f"Error in Integration Improvement: {str(e)}")
-            return AIMessage(
-                content=f"Error in integration improvement: {str(e)}",
-                name=agent_name
-            )
-    # Return only the working v2 message-based agents
+    # Return only the 4 agents actually used by the working runner
     return {
         "pom_generator_v2": pom_generator,
         "pom_critic_v2": pom_critic,
         "test_generator_v2": test_generator,
-        "test_critic_v2": test_critic,
-        "integration_critic_v2": integration_critic,
-        "integration_framework_expert": integration_framework_expert,  # NEW
-        "integration_improvement_agent": integration_improvement_agent,  # NEW
+        "test_critic_v2": test_critic
     }
 
 def test_agents():
@@ -227,7 +162,7 @@ def test_agents():
 
 if __name__ == "__main__":
     """Test the agents when running this file directly."""
-    print("Testing cleaned LangGraph agents...")
+    print("Testing cleaned agent configuration...")
     success = test_agents()
     if success:
         print("✅ All agents configured successfully!")
