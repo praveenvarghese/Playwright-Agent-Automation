@@ -1,26 +1,20 @@
 # Core Dependencies
-playwright==1.50.0
-autogen==0.4.0
 python-dotenv==1.0.1
 openai==1.58.1
-browser-use==0.1.39
-flaml[automl]
+mcp
+
+# LangGraph/LangChain for AI workflow
 langgraph
 langchain-openai
-# Azure SDK
+
+# Azure SDK for Vector Search
 azure-search-documents==11.6.0b1
 azure-core==1.29.5
 
-# Token Monitoring Dependencies
-tiktoken>=0.7,<1.0        # For token counting
-matplotlib==3.8.0      # For report visualization
-requests>=2.32.3       # For API calls
-
-# Optional Dependencies
+# Development/Testing
 pytest==7.4.3
 pytest-asyncio==0.23.6
-pytest-playwright==0.7.0
 
-# Code Quality Tools
+# Code Quality
 black==24.3.0
 flake8==7.0.0
