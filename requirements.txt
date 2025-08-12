@@ -21,3 +21,6 @@ flake8==7.0.0
 
 #Azure devops
 aiohttp
+
+tree-sitter==0.25.1
+tree-sitter-typescript==0.23.2
