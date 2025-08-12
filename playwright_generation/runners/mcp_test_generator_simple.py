@@ -33,7 +33,7 @@ from playwright_generation.common.vector_retrieval import fetch_test_case_by_id
 from playwright_generation.mcp_helpers.mcp_manager import WorkingMCPManager
 from playwright_generation.agents.agent_config import create_agents
 from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized, load_mcp_execution_log
-
+from playwright_generation.common.azure_devops_client import fetch_from_azure_devops
 # =============================================================================
 # STATE DEFINITION (from pom_test_runner.py)
 # =============================================================================
@@ -51,10 +51,18 @@ class TestGenerationState(TypedDict):
 # =============================================================================
 
 async def fetch_test_case(test_case_id):
-    """Fetch test case from vector database OR file based on env variable"""
+    """Fetch test case from configured source (vector/file/azure_devops)"""
     source = os.getenv("TEST_CASE_SOURCE", "vector").lower()
     
-    if source == "file":
+    if source == "azure_devops":
+        print(f"📄 Loading test case from Azure DevOps: {test_case_id}")
+        try:
+            return await fetch_from_azure_devops(test_case_id)
+        except Exception as e:
+            print(f"❌ Error loading from Azure DevOps: {e}")
+            return None
+    
+    elif source == "file":
         print(f"📄 Loading test case from file: {test_case_id}")
         try:
             with open(test_case_id, 'r', encoding='utf-8') as f:
@@ -104,7 +112,7 @@ async def fetch_test_case(test_case_id):
             print(f"❌ Error loading file: {e}")
             return None
     
-    else:
+    else:  # vector (default)
         try:
             print(f"🔍 Searching for test case ID: {test_case_id}")
             test_case = await fetch_test_case_by_id(test_case_id)
