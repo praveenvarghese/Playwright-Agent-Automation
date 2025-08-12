@@ -535,7 +535,7 @@ class ProjectIntelligence:
         }
     
     def make_integration_decisions(self, test_request: Dict[str, Any]) -> Dict[str, Any]:
-        """Make decisions about where to place new test and what to reuse"""
+        """Make decisions about where to place new test and what to reuse - ALWAYS CREATE NEW TESTS"""
         analysis = self.analyze_project_structure()
         
         # Extract domain from test request
@@ -543,52 +543,95 @@ class ProjectIntelligence:
         
         # Make placement decisions
         decisions = {
-            'spec_decision': self._decide_spec_placement(domain, analysis),
+            'spec_decision': self._decide_spec_placement_new_file_only(domain, analysis),
             'page_decision': self._decide_page_placement(domain, analysis),
             'method_reuse': self._decide_method_reuse(test_request, analysis),
-            'selector_strategy': analysis['patterns']['selector_strategy']
+            'selector_strategy': analysis['patterns']['selector_strategy'],
+            'analysis': analysis,  # Include full analysis for context
+            'patterns': analysis['patterns']  # Include patterns for test generation
         }
         
         return decisions
-    
+
+    def _decide_spec_placement_new_file_only(self, domain: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """Always decide to create new test file, but suggest good naming based on existing patterns"""
+        existing_files = [f['name'] for f in analysis['tests']['files']]
+        
+        # Analyze existing naming patterns
+        naming_pattern = self._detect_test_naming_pattern(existing_files)
+        
+        # Generate suggested name based on domain and patterns
+        suggested_name = self._generate_test_name(domain, naming_pattern)
+        
+        return {
+            'action': 'create',
+            'target': suggested_name,
+            'reasoning': f'Always create new test file, following detected naming pattern: {naming_pattern}'
+        }
+
+    def _detect_test_naming_pattern(self, existing_files: List[str]) -> str:
+        """Detect naming pattern from existing test files generically"""
+        if not existing_files:
+            return 'default'
+        
+        patterns = {
+            'kebab-case': 0,
+            'camelCase': 0,
+            'domain-specific': 0,
+            'action-based': 0
+        }
+        
+        for filename in existing_files:
+            name = filename.lower()
+            if '-' in name:
+                patterns['kebab-case'] += 1
+            if any(char.isupper() for char in filename):
+                patterns['camelCase'] += 1
+            if any(domain in name for domain in ['user', 'environment', 'auth', 'admin']):
+                patterns['domain-specific'] += 1
+            if any(action in name for action in ['create', 'edit', 'delete', 'manage']):
+                patterns['action-based'] += 1
+        
+        # Return most common pattern
+        return max(patterns, key=patterns.get)
+
+    def _generate_test_name(self, domain: str, naming_pattern: str) -> str:
+        """Generate test name based on domain and detected naming pattern"""
+        if naming_pattern == 'kebab-case':
+            return f"{domain}-management.spec.ts"
+        elif naming_pattern == 'camelCase':
+            return f"{domain}Management.spec.ts"
+        elif naming_pattern == 'domain-specific':
+            return f"{domain}.spec.ts"
+        elif naming_pattern == 'action-based':
+            return f"edit-{domain}.spec.ts"
+        else:
+            return f"{domain}.spec.ts"
+
     def _extract_domain_from_request(self, test_request: Dict[str, Any]) -> str:
         """Extract functional domain from test request"""
-        steps = test_request.get('steps', [])
+        steps = test_request.get('steps', '')
         title = test_request.get('title', '')
         
-        # Enhanced domain detection based on your actual project structure
+        # Enhanced domain detection based on content analysis
         domain_keywords = {
             'users': ['user', 'account', 'profile'],
             'auth': ['login', 'logout', 'signin', 'authentication'],
             'environment': ['environment', 'env', 'workspace'],
             'applications': ['application', 'app'],
-            'groups': ['group', 'groups']
+            'groups': ['group', 'groups'],
+            'settings': ['setting', 'config', 'configuration'],
+            'reports': ['report', 'analytics', 'dashboard'],
+            'admin': ['admin', 'administration', 'manage']
         }
         
-        content = f"{title} {' '.join(steps)}".lower()
+        content = f"{title} {steps}".lower()
         
         for domain, keywords in domain_keywords.items():
             if any(keyword in content for keyword in keywords):
                 return domain
         
         return 'general'
-    
-    def _decide_spec_placement(self, domain: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """Decide where to place the new test spec"""
-        existing_files = [f['name'] for f in analysis['tests']['files']]
-        
-        # Check exact matches first
-        exact_matches = [f for f in existing_files if domain in f.lower()]
-        if exact_matches:
-            return {'action': 'append', 'target': f"{exact_matches[0]}.ts"}
-        
-        # Check for management files
-        management_pattern = f"{domain}-management"
-        mgmt_matches = [f for f in existing_files if management_pattern in f.lower()]
-        if mgmt_matches:
-            return {'action': 'append', 'target': f"{mgmt_matches[0]}.ts"}
-        
-        return {'action': 'create', 'target': f"{domain}.spec.ts"}
     
     def _decide_page_placement(self, domain: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
         """Decide page object placement"""
