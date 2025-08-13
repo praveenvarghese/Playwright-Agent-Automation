@@ -5,6 +5,7 @@ Extraction utilities for Playwright test generation.
 import re
 import os
 import json
+from typing import Dict, List, Set
 
 def extract_code_blocks(text, language="javascript"):
     """Extract code blocks from text."""
@@ -48,3 +49,68 @@ def load_mcp_execution_log(test_case_id):
         with open(mcp_file, 'r') as f:
             return json.load(f)
     return []
+
+def extract_pom_methods(pom_content: str) -> Dict[str, List[str]]:
+    """Extract method names from POM classes"""
+    methods_by_class = {}
+    
+    # Find all class definitions
+    class_matches = re.findall(r'export class (\w+)', pom_content)
+    
+    for class_name in class_matches:
+        # Extract methods for this class
+        class_pattern = rf'export class {class_name}.*?(?=export class|\Z)'
+        class_content = re.search(class_pattern, pom_content, re.DOTALL)
+        
+        if class_content:
+            # Find async method definitions
+            method_matches = re.findall(r'async (\w+)\s*\(', class_content.group(0))
+            methods_by_class[class_name] = method_matches
+    
+    return methods_by_class
+
+def extract_test_method_calls(test_content: str) -> Dict[str, List[str]]:
+    """Extract method calls from test files"""
+    calls_by_object = {}
+    
+    # Find POM instantiations
+    instantiation_matches = re.findall(r'const (\w+) = new (\w+)\(', test_content)
+    
+    for var_name, class_name in instantiation_matches:
+        # Find method calls on this object
+        call_pattern = rf'{var_name}\.(\w+)\s*\('
+        method_calls = re.findall(call_pattern, test_content)
+        calls_by_object[class_name] = method_calls
+    
+    return calls_by_object
+
+def validate_method_consistency(pom_methods: Dict[str, List[str]], 
+                              test_calls: Dict[str, List[str]]) -> List[str]:
+    """Validate that test calls match POM methods"""
+    issues = []
+    
+    for class_name, called_methods in test_calls.items():
+        available_methods = pom_methods.get(class_name, [])
+        
+        for called_method in called_methods:
+            if called_method not in available_methods:
+                issues.append(
+                    f"❌ {class_name}.{called_method}() called in test but not defined in POM. "
+                    f"Available methods: {', '.join(available_methods)}"
+                )
+    
+    return issues
+
+def create_method_validation_prompt(pom_content: str) -> str:
+    """Create a validation prompt with extracted method names"""
+    methods_by_class = extract_pom_methods(pom_content)
+    
+    validation_text = "AVAILABLE POM METHODS (use ONLY these):\n"
+    for class_name, methods in methods_by_class.items():
+        validation_text += f"\n{class_name}:\n"
+        for method in methods:
+            validation_text += f"  - {method}()\n"
+    
+    validation_text += "\n⚠️ CRITICAL: Only call methods listed above. Do not invent new method names."
+    
+    return validation_text
