@@ -485,40 +485,48 @@ Focus on implementing the suggestions from the critique.
         
         test_case_json = json.dumps(state["test_case"], indent=2)
         
+        # Extract improved POMs from conversation
+        improved_poms = ""
+        for msg in reversed(state["messages"]):
+            if hasattr(msg, 'name') and msg.name == "POM_Generator" and "improved" in msg.content.lower():
+                improved_poms = msg.content
+                break
+        
+        # If no improved POMs found, use the latest POM response
+        if not improved_poms:
+            for msg in reversed(state["messages"]):
+                if hasattr(msg, 'name') and msg.name == "POM_Generator":
+                    improved_poms = msg.content
+                    break
+        
         test_request = HumanMessage(
             content=f"""
-Create a Playwright test script using the improved Page Object Models from above.
+    Create a Playwright test script using the Page Object Models provided in this conversation.
 
-You must use the following testCase values inside your actual test code.
+    IMPORTANT: First extract ALL method names from the Page Object classes below, then use ONLY those exact method names.
 
-✅ Correct:
-    await page.goto(testCase.loginUrl);
-    await loginPage.login(testCase.username, testCase.password);
-    await environmentPage.createEnvironment(testCase.environmentName);
-    await expect(page.locator(testCase.resultSelector)).toHaveText(testCase.expectedText);
+    Page Object Models (Latest Version):
+    {improved_poms}
 
-❌ Incorrect:
-    await page.goto('https://example.com/login');
-    await loginPage.login('admin', 'password');
-    await environmentPage.createEnvironment('My New Environment');
+    Test Case:
+    ```json
+    {test_case_json}
+    ```
 
-Test Case:
-```json
-{test_case_json}
-```
+    Requirements:
+    1. Extract method names from POMs above - use ONLY those exact names
+    2. Do NOT use any hardcoded values. Use fields from `testCase`
+    3. Follow best practices: Arrange → Act → Assert
+    4. Use ES6 module imports
+    5. NO try-catch blocks unless handling specific expected errors
+    6. NO unnecessary waits or complexity
 
-Requirements:
-1. Do NOT use any hardcoded values. Use fields from `testCase`
-2. Use only the values passed in `testCase` for all navigation, inputs, and assertions
-3. Follow best practices: Arrange → Act → Assert
-4. Use ES6 module imports
-
-Format the output as:
-### N. testCase.spec.js
-```javascript
-// Implementation here
-```
-""",
+    Format the output as:
+    ### N. testCase.spec.js
+    ```javascript
+    // Implementation here
+    ```
+    """,
             name="User"
         )
         

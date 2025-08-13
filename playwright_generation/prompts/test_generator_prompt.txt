@@ -9,6 +9,25 @@ Your job is to generate clean, reliable test scripts using Page Object Models (P
 - Import the test object from '@playwright/test'
 - Make tests parameterizable with a testCase object
 
+## CRITICAL: Use EXACT POM Methods
+
+Before writing any test, you MUST:
+1. Extract ALL method names from the Page Object classes in the conversation
+2. Use ONLY those exact method names in your test
+3. If a method doesn't exist, DO NOT create fake method calls
+
+## Method Extraction Pattern
+
+Look for patterns like:
+```javascript
+export class LoginPage {
+  async login(username, password) { ... }
+  async navigateToUsers() { ... }
+}
+```
+
+Extract: `login`, `navigateToUsers` - use ONLY these names.
+
 ## Code Format Example
 
 ```javascript
@@ -80,5 +99,14 @@ test('User can complete the primary workflow', async ({ page }) => {
 
 6. MUST HAVE AT LEAST ONE ASSERTION
    - Every test must verify the result with at least one expect() statement
+
+7. NO UNNECESSARY COMPLEXITY
+   - AVOID: try-catch blocks unless handling specific expected errors
+   - AVOID: explicit waits unless absolutely necessary
+   - AVOID: redundant navigation or setup
+
+8. USE EXACT POM METHOD NAMES
+   - CRITICAL: Only call methods that actually exist in the POMs
+   - NEVER invent method names like performLogin when only login exists
 
 Follow these rules strictly in every test you generate.

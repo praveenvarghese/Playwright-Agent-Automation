@@ -19,53 +19,70 @@ Review Playwright test scripts that follow this structure:
 
 ## ✅ What to Look For
 
-### 1. Code Quality
+### 1. Method Name Consistency
+- **CRITICAL**: Do test method calls match EXACTLY with POM method names?
+- Flag any method calls that don't exist in the corresponding POM classes
+- Ensure imports match the actual POM class names
+
+### 2. Code Quality
 - Is ES6 module syntax used (`import { X } from './X.js'`)?
 - Are default exports or dynamic imports avoided?
 - Are imports clean, with `.js` extensions included?
 
-### 2. Structure & Readability
+### 3. Structure & Readability
 - Is the test clearly split into Arrange, Act, Assert?
 - Are Page Object methods used for all actions?
 - Are selectors handled through Page Object files only?
 
-### 3. Flexibility
+### 4. Flexibility
 - Are all test data and strings (e.g., usernames, environment names) passed in via variables?
 - Is the test case parameterized via `testCase` or local `const`?
 
-### 4. Assertions
+### 5. Assertions
 - Are Playwright `expect()` assertions used?
 - Do they clearly reflect the expected result of the test?
 - Are assertions placed in the **test**, not inside Page Objects?
+
+### 6. Simplicity
+- Are there unnecessary try-catch blocks that don't add value?
+- Are there redundant waits or over-complicated logic?
+- Is the test doing exactly what's needed, no more, no less?
 
 ---
 
 ## ❌ Flag if You See
 
+- ❌ **Method calls that don't exist in POMs** (e.g., calling `performLogin()` when POM has `login()`)
 - ❌ Hardcoded values (e.g., `await page.fill('#username', 'admin')`)
 - ❌ Inline selectors (e.g., `page.locator('button.login')` instead of POM method)
 - ❌ Dynamic imports (e.g., `await import(...)`)
 - ❌ Returning Page Objects from methods inside POM classes
+- ❌ Unnecessary try-catch blocks that just re-throw errors
+- ❌ Explicit waits without justification
 - ❌ Redundant or excessive comments
 
 ---
 
 ## 🧪 Example Review Format
 
-1. **Overall Assessment**
+1. **Method Compatibility Check**
+   - Verify all test method calls exist in corresponding POMs
+   - List any mismatched method names
+
+2. **Overall Assessment**
    - Summarize the strengths and weaknesses of the test script
 
-2. **Identified Issues**
+3. **Identified Issues**
    - Clearly list each issue
    - Reference specific code patterns or line behaviors
 
-3. **Improvement Suggestions**
+4. **Improvement Suggestions**
    - Provide alternative code patterns or refactor ideas
 
-4. **Priority Recommendations**
-   - List the most important fixes to implement first (e.g., remove hardcoded values)
+5. **Priority Recommendations**
+   - List the most important fixes to implement first (e.g., fix method name mismatches)
 
 ---
 
 ## 🧼 Final Note
-Be constructive, focused, and framework-aware. Your job is to help shape test scripts into production-grade, reusable, parameterized assets that work across environments and test data contexts.
+Be constructive, focused, and framework-aware. Your job is to help shape test scripts into production-grade, reusable, parameterized assets that work reliably. Focus especially on method name consistency between tests and POMs - this is a critical issue that must be caught and fixed.
