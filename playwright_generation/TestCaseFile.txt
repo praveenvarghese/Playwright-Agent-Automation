@@ -2,8 +2,7 @@ Title: Edit Existing Environment URL
 Steps:
 1. Navigate to Users Page.
 2. Select a "TestEnvironemnt" from the list.
-3. HOver and Click on 'Edit' button.
+3. Hover and Click on 'Edit' button.
 4. Change the URL and click 'Save'.
-5. Verify the environment URL is updated in the list.
 Expected:
-The environment URL is successfully updated in the environment list.
+The TestEnvironemnt will have Linked tag now
