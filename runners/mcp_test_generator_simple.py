@@ -26,14 +26,14 @@ if sys.platform == "win32":
 load_dotenv()
 
 # Add project to path  
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import only the modules that still exist
-from playwright_generation.common.vector_retrieval import fetch_test_case_by_id
-from playwright_generation.mcp_helpers.mcp_manager import WorkingMCPManager
-from playwright_generation.agents.agent_config import create_agents
-from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized, load_mcp_execution_log
-from playwright_generation.common.azure_devops_client import fetch_from_azure_devops
+from common.vector_retrieval import fetch_test_case_by_id
+from mcp_helpers.mcp_manager import WorkingMCPManager
+from agents.agent_config import create_agents
+from orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized, load_mcp_execution_log
+from common.azure_devops_client import fetch_from_azure_devops
 # =============================================================================
 # STATE DEFINITION (from pom_test_runner.py)
 # =============================================================================

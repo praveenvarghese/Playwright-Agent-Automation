@@ -32,11 +32,11 @@ sys.path.insert(0, project_root)
 
 # Import modules - using relative imports and sys.path
 try:
-    from playwright_generation.common.vector_retrieval import fetch_test_case_by_id
-    from playwright_generation.mcp_helpers.mcp_manager import WorkingMCPManager
-    from playwright_generation.agents.agent_config import create_agents
-    from playwright_generation.orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized, load_mcp_execution_log
-    from playwright_generation.common.azure_devops_client import fetch_from_azure_devops
+    from common.vector_retrieval import fetch_test_case_by_id
+    from mcp_helpers.mcp_manager import WorkingMCPManager
+    from agents.agent_config import create_agents
+    from orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized, load_mcp_execution_log
+    from common.azure_devops_client import fetch_from_azure_devops
 except ImportError:
     # Fallback for when running from project root
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -145,7 +145,7 @@ async def run_intelligence_analysis(test_case, target_project_path):
     try:
         print("🧠 Running intelligence analysis...")
         try:
-            from playwright_generation.intelligence.project_intelligence import create_project_intelligence
+            from intelligence.project_intelligence import create_project_intelligence
         except ImportError:
             from intelligence.project_intelligence import create_project_intelligence
         

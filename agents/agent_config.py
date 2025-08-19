@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from typing import List
-from playwright_generation.agents.agent_prompts import(
+from agents.agent_prompts import(
     POM_GENERATOR_PROMPT,
     POM_CRITIC_PROMPT,
     TEST_GENERATOR_PROMPT,

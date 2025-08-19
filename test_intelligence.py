@@ -11,7 +11,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent  # Go up one level to get to root
 sys.path.insert(0, str(project_root))
 
-from playwright_generation.intelligence.project_intelligence import create_project_intelligence
+from intelligence.project_intelligence import create_project_intelligence
 
 def test_intelligence_scanner():
     """Test the intelligence scanner with your actual project"""
