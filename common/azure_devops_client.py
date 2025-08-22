@@ -4,6 +4,7 @@ import base64
 import json
 import xml.etree.ElementTree as ET
 import re
+import html
 from dotenv import load_dotenv
 
 async def fetch_from_azure_devops(work_item_id):
@@ -85,9 +86,12 @@ def _map_azure_workitem_to_testcase(work_item):
     if work_item_type.lower() != 'test case':
         print(f"⚠️ Warning: Work item {work_item_id} is type '{work_item_type}', not 'Test Case'")
     
-    # Extract test steps (Azure DevOps stores steps in XML format)
+    # Extract test steps with improved parser
     steps_xml = fields.get('Microsoft.VSTS.TCM.Steps', '')
     steps_text = _parse_azure_steps(steps_xml)
+    
+    # Extract structured steps for assertions
+    structured_steps = _extract_structured_steps(steps_xml)
     
     # Extract acceptance criteria or description as expected results
     expected_results = (
@@ -96,11 +100,12 @@ def _map_azure_workitem_to_testcase(work_item):
         'Test should complete successfully'
     )
     
-    # Return in standard format (same as vector_retrieval.py)
+    # Return in standard format
     test_case = {
         'id': f"ADO-{work_item_id}",
         'title': title,
         'steps': steps_text,
+        'structured_steps': structured_steps,  # NEW: Add structured data
         'expectedResults': _clean_html(expected_results),
         'source': 'azure_devops',
         'metadata': {
@@ -115,59 +120,83 @@ def _map_azure_workitem_to_testcase(work_item):
     }
     
     print(f"✅ Loaded from Azure DevOps: {title} (Type: {work_item_type})")
+    print(f"📋 Extracted {len(structured_steps)} structured steps")
     return test_case
 
 def _parse_azure_steps(steps_xml):
-    """Parse Azure DevOps test steps XML into readable text"""
+    """Fixed parser - extracts actions for MCP execution"""
+    
     if not steps_xml:
         return "No steps defined"
     
     try:
-        # Azure DevOps stores test steps in XML format
+        # Extract all parameterizedString content using regex
+        pattern = r'<parameterizedString[^>]*>(.*?)</parameterizedString>'
+        matches = re.findall(pattern, steps_xml, re.DOTALL | re.IGNORECASE)
+        
         steps_text = ""
-        step_counter = 1
+        step_num = 1
         
-        # Try to parse as XML
-        if steps_xml.strip().startswith('<'):
-            try:
-                root = ET.fromstring(f"<root>{steps_xml}</root>")
-                steps = root.findall('.//step')
+        # Process pairs: [0] = action, [1] = expected, [2] = next action, [3] = next expected
+        for i in range(0, len(matches), 2):
+            if i < len(matches):
+                action_raw = matches[i]
                 
-                for step in steps:
-                    # Extract action (parameterizedString)
-                    action_elem = step.find('.//parameterizedString')
-                    if action_elem is not None:
-                        action_text = _clean_html(action_elem.text or "")
-                        if action_text.strip():
-                            steps_text += f"{step_counter}. {action_text.strip()}\n"
-                            step_counter += 1
+                # Clean HTML
+                action_clean = html.unescape(action_raw)
+                action_clean = re.sub(r'<[^>]+>', '', action_clean)
+                action_clean = re.sub(r'\s+', ' ', action_clean).strip()
                 
-                if steps_text.strip():
-                    return steps_text.strip()
-                    
-            except ET.ParseError:
-                # Fallback to regex parsing if XML parsing fails
-                pass
+                if action_clean:
+                    steps_text += f"{step_num}. {action_clean}\n"
+                    step_num += 1
         
-        # Fallback: Use regex to extract steps
-        if '<step' in steps_xml.lower():
-            # Extract parameterizedString content
-            action_pattern = r'<parameterizedString[^>]*>(.*?)</parameterizedString>'
-            actions = re.findall(action_pattern, steps_xml, re.DOTALL | re.IGNORECASE)
-            
-            for i, action in enumerate(actions, 1):
-                clean_action = _clean_html(action)
-                if clean_action.strip():
-                    steps_text += f"{i}. {clean_action.strip()}\n"
-        else:
-            # Plain text fallback
-            steps_text = _clean_html(steps_xml)
-        
-        return steps_text.strip() if steps_text.strip() else "Steps not properly formatted"
+        return steps_text.strip() if steps_text.strip() else "No steps could be parsed"
         
     except Exception as e:
-        print(f"⚠️ Warning: Could not parse steps XML: {e}")
-        return _clean_html(steps_xml) or "Steps parsing failed"
+        print(f"⚠️ Parsing error: {e}")
+        return "Parsing failed"
+
+def _extract_structured_steps(steps_xml):
+    """Extract structured steps with actions and expected results"""
+    
+    if not steps_xml:
+        return []
+    
+    try:
+        pattern = r'<parameterizedString[^>]*>(.*?)</parameterizedString>'
+        matches = re.findall(pattern, steps_xml, re.DOTALL | re.IGNORECASE)
+        
+        structured_steps = []
+        step_num = 1
+        
+        for i in range(0, len(matches), 2):
+            if i < len(matches):
+                action_raw = matches[i]
+                expected_raw = matches[i + 1] if (i + 1) < len(matches) else ""
+                
+                # Clean both
+                action_clean = html.unescape(action_raw)
+                action_clean = re.sub(r'<[^>]+>', '', action_clean)
+                action_clean = re.sub(r'\s+', ' ', action_clean).strip()
+                
+                expected_clean = html.unescape(expected_raw) if expected_raw else ""
+                expected_clean = re.sub(r'<[^>]+>', '', expected_clean) if expected_clean else ""
+                expected_clean = re.sub(r'\s+', ' ', expected_clean).strip() if expected_clean else ""
+                
+                if action_clean:
+                    structured_steps.append({
+                        'step': step_num,
+                        'action': action_clean,
+                        'expected': expected_clean
+                    })
+                    step_num += 1
+        
+        return structured_steps
+        
+    except Exception as e:
+        print(f"⚠️ Error extracting structured steps: {e}")
+        return []
 
 def _clean_html(text):
     """Remove HTML tags and clean up text"""
@@ -258,6 +287,15 @@ if __name__ == "__main__":
                 print(f"Title: {result['title']}")
                 print(f"Steps: {result['steps'][:100]}...")
                 print(f"Expected: {result['expectedResults'][:100]}...")
+                print(f"Structured steps: {len(result.get('structured_steps', []))}")
+                
+                # Show first few structured steps
+                structured_steps = result.get('structured_steps', [])
+                if structured_steps:
+                    print(f"\nFirst 3 structured steps:")
+                    for step in structured_steps[:3]:
+                        print(f"  {step['step']}. Action: {step['action'][:60]}...")
+                        print(f"      Expected: {step['expected'][:60]}...")
             else:
                 print("❌ Failed to fetch test case")
     

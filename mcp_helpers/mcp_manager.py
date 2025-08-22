@@ -27,7 +27,7 @@ class WorkingMCPManager:
         
         try:
             server_params = StdioServerParameters(
-                command="npx",
+                command="npx.cmd",
                 args=["-y", "@playwright/mcp@latest"]
             )
             

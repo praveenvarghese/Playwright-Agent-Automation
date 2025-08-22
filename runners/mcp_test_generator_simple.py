@@ -485,6 +485,9 @@ Focus on implementing the suggestions from the critique.
         
         test_case_json = json.dumps(state["test_case"], indent=2)
         
+        # Extract structured steps for better assertions
+        structured_steps = state["test_case"].get("structured_steps", [])
+        
         # Extract improved POMs from conversation
         improved_poms = ""
         for msg in reversed(state["messages"]):
@@ -513,13 +516,31 @@ Focus on implementing the suggestions from the critique.
     {test_case_json}
     ```
 
-    Requirements:
+    Structured Steps with Expected Results:
+    ```json
+    {json.dumps(structured_steps, indent=2)}
+    ```
+
+    CRITICAL REQUIREMENTS:
     1. Extract method names from POMs above - use ONLY those exact names
     2. Do NOT use any hardcoded values. Use fields from `testCase`
-    3. Follow best practices: Arrange → Act → Assert
-    4. Use ES6 module imports
-    5. NO try-catch blocks unless handling specific expected errors
-    6. NO unnecessary waits or complexity
+    3. For each action, write corresponding assertions based on the expected results above
+    4. Use the structured_steps to create proper expect() statements
+    5. Follow best practices: Arrange → Act → Assert
+    6. Use ES6 module imports
+    7. NO try-catch blocks unless handling specific expected errors
+    8. NO unnecessary waits or complexity
+
+    Example assertion pattern:
+    ```javascript
+    // After performing action: "Click on Home breadcrumb"
+    // Use expected result: "User is successfully redirected to the homepage"
+    await page.getByText("Home").click();
+    await expect(page).toHaveURL(testCase.homepageUrl);
+    await expect(page.getByText("Welcome")).toBeVisible();
+    ```
+
+    Create real assertions based on the structured_steps expected results instead of generic placeholders.
 
     Format the output as:
     ### N. testCase.spec.js
