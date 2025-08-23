@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Complete Playwright Test Generator - Single File
-All functionality inlined - no dependencies on other runner files
+Complete Playwright Test Generator - Simple Fix for Structured Steps
+Only changed the MCP prompt to include expected results from Azure DevOps structured steps
 """
 
 import asyncio
@@ -34,8 +34,9 @@ from mcp_helpers.mcp_manager import WorkingMCPManager
 from agents.agent_config import create_agents
 from orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized, load_mcp_execution_log
 from common.azure_devops_client import fetch_from_azure_devops
+
 # =============================================================================
-# STATE DEFINITION (from pom_test_runner.py)
+# STATE DEFINITION
 # =============================================================================
 
 class TestGenerationState(TypedDict):
@@ -47,7 +48,7 @@ class TestGenerationState(TypedDict):
     test_file: str
 
 # =============================================================================
-# MCP AUTOMATION FUNCTIONS (from mcp_test_generator.py)
+# MCP AUTOMATION FUNCTIONS - WITH STRUCTURED STEPS FIX
 # =============================================================================
 
 async def fetch_test_case(test_case_id):
@@ -148,12 +149,29 @@ async def run_mcp_automation(test_case_id, test_case):
         await manager.cleanup()
 
 async def execute_with_conversation(manager, test_case_id, test_case):
-    """Execute test using AI conversation"""
+    """Execute test using AI conversation - ENHANCED WITH STRUCTURED STEPS"""
     client = AzureOpenAI(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version="2024-02-15-preview"
     )
+    
+    # 🎯 THE SIMPLE FIX: Check if we have structured steps with expected results
+    structured_steps = test_case.get('structured_steps', [])
+    
+    if structured_steps:
+        # Build detailed step-by-step instructions with expected results
+        detailed_steps = "\n🎯 EXECUTE EACH STEP WITH VERIFICATION:\n"
+        for step in structured_steps:
+            detailed_steps += f"\n--- STEP {step['step']} ---\n"
+            detailed_steps += f"ACTION: {step['action']}\n"
+            if step.get('expected'):
+                detailed_steps += f"EXPECTED RESULT: {step['expected']}\n"
+                detailed_steps += f"🔍 AFTER ACTION: Verify that {step['expected']}\n"
+        step_instructions = detailed_steps
+    else:
+        # Fallback to basic steps
+        step_instructions = f"\nTEST STEPS:\n{test_case.get('steps', '')}"
     
     test_prompt = f"""
 Execute this test case step by step:
@@ -174,10 +192,9 @@ PREREQUISITE STEPS:
 4. Fill in username with the provided credentials
 5. Fill in password and submit
 
-TEST STEPS:
-{test_case.get('steps', '')}
+{step_instructions}
 
-EXPECTED RESULTS:
+OVERALL EXPECTED RESULTS:
 {test_case.get('expectedResults', '')}
 
 Continue until all test steps are completed or you encounter an error.
@@ -205,6 +222,8 @@ Continue until all test steps are completed or you encounter an error.
     iteration = 0
 
     print("🧪 Starting AI-driven test execution...")
+    if structured_steps:
+        print(f"📋 Using {len(structured_steps)} structured steps with expected results")
 
     while iteration < max_iterations:
         iteration += 1
@@ -385,7 +404,7 @@ Example:
         return None
 
 # =============================================================================
-# 6-STEP WORKFLOW (from pom_test_runner.py) 
+# 6-STEP WORKFLOW (unchanged from original)
 # =============================================================================
 
 def create_pom_test_workflow():
@@ -395,7 +414,9 @@ def create_pom_test_workflow():
     def generate_pom_node(state: TestGenerationState) -> TestGenerationState:
         print("🔍 Step 1: Generating Page Object Models")
         
-        selectors_json = json.dumps(state["selectors"], indent=2)
+        # Load the FULL execution log instead of just selectors
+        execution_log = load_mcp_execution_log(state["test_case_id"])
+        execution_json = json.dumps(execution_log, indent=2) if execution_log else json.dumps(state["selectors"], indent=2)
         test_case = state["test_case"]
         
         initial_message = HumanMessage(
@@ -405,10 +426,10 @@ Generate Page Object Models for Playwright based on the provided selectors.
 Test Case ID: {state["test_case_id"]}
 Test Case Title: {test_case.get('title', '')}
 
+```python
 MCP Execution Log (contains actual working Playwright code):
 ```json
-{selectors_json}
-```
+{execution_json}
 
 Instructions:
 1. Analyze the selectors to identify logical pages
@@ -691,7 +712,7 @@ def save_test_script(test_content, output_dir, test_case_id):
     return test_file_path
 
 # =============================================================================
-# MAIN EXECUTION FUNCTIONS
+# MAIN EXECUTION FUNCTIONS (unchanged from original)
 # =============================================================================
 
 async def generate_complete_test(test_case_id: str, output_dir: str = "complete_tests"):
