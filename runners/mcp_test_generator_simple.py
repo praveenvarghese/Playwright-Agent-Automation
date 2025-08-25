@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Complete Playwright Test Generator - Simple Fix for Structured Steps
-Only changed the MCP prompt to include expected results from Azure DevOps structured steps
+Enhanced Playwright Test Generator with Conditional Verification
+Now includes verification only when Azure DevOps steps have expected results
 """
 
 import asyncio
@@ -42,13 +42,12 @@ from common.azure_devops_client import fetch_from_azure_devops
 class TestGenerationState(TypedDict):
     test_case_id: str
     test_case: dict
-    selectors: list
     messages: List[BaseMessage]
     page_objects: list
     test_file: str
 
 # =============================================================================
-# MCP AUTOMATION FUNCTIONS - WITH STRUCTURED STEPS FIX
+# MCP AUTOMATION FUNCTIONS - ENHANCED WITH CONDITIONAL VERIFICATION
 # =============================================================================
 
 async def fetch_test_case(test_case_id):
@@ -133,7 +132,7 @@ async def run_mcp_automation(test_case_id, test_case):
         print("🎭 Starting MCP automation")
         await manager.start_server()
         
-        execution_log = await execute_with_conversation(manager, test_case_id, test_case)
+        execution_log = await execute_with_conditional_verification(manager, test_case_id, test_case)
         
         # Save execution log
         with open(f"{test_case_id}_mcp_execution_log.json", "w") as f:
@@ -148,42 +147,57 @@ async def run_mcp_automation(test_case_id, test_case):
     finally:
         await manager.cleanup()
 
-async def execute_with_conversation(manager, test_case_id, test_case):
-    """Execute test using AI conversation - ENHANCED WITH STRUCTURED STEPS"""
+async def execute_with_conditional_verification(manager, test_case_id, test_case):
+    """
+    ENHANCED: Execute test with conditional verification based on Azure DevOps expected results
+    """
     client = AzureOpenAI(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version="2024-02-15-preview"
     )
     
-    # 🎯 THE SIMPLE FIX: Check if we have structured steps with expected results
+    # 🎯 ENHANCED: Check for structured steps with expected results
     structured_steps = test_case.get('structured_steps', [])
     
     if structured_steps:
-        # Build detailed step-by-step instructions with expected results
-        detailed_steps = "\n🎯 EXECUTE EACH STEP WITH VERIFICATION:\n"
+        # Build conditional verification instructions
+        detailed_steps = "\n🎯 EXECUTE EACH STEP WITH CONDITIONAL VERIFICATION:\n"
         for step in structured_steps:
             detailed_steps += f"\n--- STEP {step['step']} ---\n"
             detailed_steps += f"ACTION: {step['action']}\n"
             if step.get('expected'):
                 detailed_steps += f"EXPECTED RESULT: {step['expected']}\n"
-                detailed_steps += f"🔍 AFTER ACTION: Verify that {step['expected']}\n"
+                detailed_steps += f"🔍 AFTER ACTION: Take browser_snapshot and verify that {step['expected']}\n"
+                detailed_steps += f"📝 EXPLAIN: Compare the snapshot with expected result and explain if it matches\n"
+            else:
+                detailed_steps += f"🔍 AFTER ACTION: Take browser_snapshot to capture current state for logging\n"
         step_instructions = detailed_steps
+        print(f"📋 Using {len(structured_steps)} structured steps with conditional verification")
     else:
         # Fallback to basic steps
         step_instructions = f"\nTEST STEPS:\n{test_case.get('steps', '')}"
+        print("📋 Using basic steps format")
     
     test_prompt = f"""
-Execute this test case step by step:
+Execute this test case step by step with conditional verification:
 
 CONTEXT:
 - Application URL: {os.getenv('APP_URL')}
 - Username: {os.getenv('APP_USERNAME')}
 - Password: {os.getenv('APP_PASSWORD')}
 
-🚨 CRITICAL: Use Playwright locator methods for all interactions:
-- Use getByRole, getByText, getByLabel methods
-- Look at the page snapshot to identify the correct element names
+🚨 CRITICAL INSTRUCTIONS:
+1. Use Playwright locator methods for all interactions (getByRole, getByText, getByLabel)
+2. When using MCP tools with 'ref' parameter, use ONLY the short ID (e.g., 'e21', not 'textbox "Username" [ref=e21]')
+3. After EACH action, use browser_snapshot to capture page state
+4. IF step has EXPECTED RESULT: Compare snapshot with expected and explain if it matches
+5. IF step has NO expected result: Just capture snapshot for logging
+
+REFERENCE FORMAT EXAMPLE:
+From snapshot: `- textbox "Username" [active] [ref=e21]`
+Correct ref: `"e21"`
+Wrong ref: `"textbox \"Username\" [active] [ref=e21]"`
 
 PREREQUISITE STEPS:
 1. Navigate to the application URL
@@ -200,17 +214,38 @@ OVERALL EXPECTED RESULTS:
 Continue until all test steps are completed or you encounter an error.
 """
 
-    system_msg = """You are executing a test case using Playwright MCP tools. 
-    Execute ALL steps in the test case, one by one. After each tool call result, 
-    continue with the next step until the entire test is complete.
-    
-    Always provide detailed technical information about:
-    - CSS selectors used
-    - Actions performed 
-    - Values entered
-    - Results observed
-    
-    Continue until all test steps are completed or you encounter an error."""
+    system_msg = """You are executing a test case using Playwright MCP tools with conditional verification.
+
+🚨 CRITICAL MCP REFERENCE FORMAT:
+When using MCP tools that require 'ref' parameter:
+- ONLY use the short reference ID (e.g., 'e21', 'e26', 'e27')  
+- DO NOT use the full description like 'textbox "Password" [ref=e26]'
+- Extract ONLY the 'e' number from the snapshot
+
+Example from snapshot:
+```yaml
+- textbox "Username" [active] [ref=e21]
+```
+Correct tool call:
+```json
+{"element": "Username", "ref": "e21", "text": "admin"}
+```
+
+ENHANCED EXECUTION FLOW:
+1. Execute each action (click, type, navigate)
+2. ALWAYS use browser_snapshot after each action to capture page state
+3. IF the step has an expected result: Analyze snapshot and verify if expectation is met
+4. IF no expected result: Just capture snapshot for logging
+5. Continue to next step
+
+Always provide detailed technical information about:
+- CSS selectors used
+- Actions performed 
+- Values entered
+- Page state captured in snapshots
+- Verification results (when expected results exist)
+
+Continue until all test steps are completed or you encounter an error."""
 
     conversation_history = [
         {"role": "system", "content": system_msg},
@@ -218,12 +253,10 @@ Continue until all test steps are completed or you encounter an error.
     ]
     
     execution_log = []
-    max_iterations = 20
+    max_iterations = 25  # Increased for verification steps
     iteration = 0
 
-    print("🧪 Starting AI-driven test execution...")
-    if structured_steps:
-        print(f"📋 Using {len(structured_steps)} structured steps with expected results")
+    print("🧪 Starting AI-driven test execution with conditional verification...")
 
     while iteration < max_iterations:
         iteration += 1
@@ -267,11 +300,13 @@ Continue until all test steps are completed or you encounter an error.
                     
                     result = await manager.execute_tool(tool_name, args)
                     
+                    # Enhanced logging with verification tracking
                     log_entry = {
                         "tool": tool_name,
                         "args": args,
                         "result": result.get("result", {}),
-                        "description": f"{tool_name} called with arguments {args}"
+                        "description": f"{tool_name} called with arguments {args}",
+                        "is_verification": tool_name == "browser_snapshot"
                     }
                     execution_log.append(log_entry)
 
@@ -291,39 +326,6 @@ Continue until all test steps are completed or you encounter an error.
 
     print(f"✅ Test execution completed after {iteration} iterations")
     return execution_log
-
-def extract_selectors(execution_log):
-    """Extract selectors from MCP execution log"""
-    selectors = []
-    
-    for entry in execution_log:
-        tool = entry["tool"]
-        args = entry["args"]
-        result = entry.get("result", {})
-        
-        if tool == "browser_navigate":
-            selectors.append({
-                "action": "navigate", 
-                "url": args.get('url', '')
-            })
-            
-        elif tool in ["browser_type", "browser_click"]:
-            playwright_code = extract_playwright_code(result)
-            
-            if playwright_code:
-                parsed_action = llm_parse_action(tool, playwright_code, args)
-                if parsed_action:
-                    selectors.append(parsed_action)
-                else:
-                    # Fallback
-                    selectors.append({
-                        "action": "input" if tool == "browser_type" else "click",
-                        "rawSelector": playwright_code,
-                        "elementName": args.get("element", ""),
-                        "value": args.get("text", "") if tool == "browser_type" else None
-                    })
-    
-    return selectors
 
 def extract_playwright_code(result):
     """Extract Playwright locator from MCP result"""
@@ -404,43 +406,64 @@ Example:
         return None
 
 # =============================================================================
-# 6-STEP WORKFLOW (unchanged from original)
+# 6-STEP WORKFLOW (ENHANCED FOR VERIFICATION DATA)
 # =============================================================================
 
 def create_pom_test_workflow():
-    """Create the 6-step LangGraph workflow"""
+    """Create the 6-step LangGraph workflow with verification enhancement"""
     agents = create_agents()
     
     def generate_pom_node(state: TestGenerationState) -> TestGenerationState:
-        print("🔍 Step 1: Generating Page Object Models")
+        print("🔍 Step 1: Generating Page Object Models with Verification Methods")
         
-        # Load the FULL execution log instead of just selectors
+        # Load the FULL execution log with verification data
         execution_log = load_mcp_execution_log(state["test_case_id"])
-        execution_json = json.dumps(execution_log, indent=2) if execution_log else json.dumps(state["selectors"], indent=2)
+        execution_json = json.dumps(execution_log, indent=2) if execution_log else "No MCP execution log available"
         test_case = state["test_case"]
+        
+        # Extract structured steps for context
+        structured_steps = test_case.get("structured_steps", [])
+        structured_steps_json = json.dumps(structured_steps, indent=2) if structured_steps else "No structured steps available"
         
         initial_message = HumanMessage(
             content=f"""
-Generate Page Object Models for Playwright based on the provided selectors. 
+Generate Page Object Models for Playwright based on the execution log with verification data.
 
 Test Case ID: {state["test_case_id"]}
 Test Case Title: {test_case.get('title', '')}
 
-```python
-MCP Execution Log (contains actual working Playwright code):
+Structured Steps with Expected Results:
+```json
+{structured_steps_json}
+```
+
+MCP Execution Log (contains actions AND verification snapshots):
 ```json
 {execution_json}
+```
 
-Instructions:
-1. Analyze the selectors to identify logical pages
-2. Create specific page objects for each logical page
-3. Follow Page Object Model best practices
-4. Format your response with clear file headers and JavaScript code blocks
+ENHANCED INSTRUCTIONS:
+1. Analyze both actions and verification results in the log
+2. Create verification methods for steps that had expected results
+3. Use snapshot data to understand what assertions are needed
+4. Generate both action methods AND verification methods
+
+Example verification method based on expected results:
+```javascript
+async verifyEditDialogVisible() {{
+  await expect(this.page.getByRole('dialog')).toBeVisible();
+  await expect(this.page.getByText('Edit environment')).toBeVisible();
+}}
+
+async verifyEnvironmentHasLinkedTag() {{
+  await expect(this.page.getByText('Linked')).toBeVisible();
+}}
+```
 
 Format each file as:
 ### 1. FileName.js
 ```javascript
-// Implementation
+// Implementation with both action and verification methods
 ```
 """,
             name="User"
@@ -457,14 +480,15 @@ Format each file as:
         
         critique_request = HumanMessage(
             content="""
-Review the Page Object Models generated above and suggest improvements.
+Review the Page Object Models generated above, focusing on verification methods.
 
 Focus on:
-1. Structure and organization
-2. Selector strategies
-3. Method design and naming
-4. Error handling
-5. Documentation
+1. Do verification methods match the expected results from the test case?
+2. Are assertions realistic based on the snapshot data?
+3. Structure and organization
+4. Selector strategies
+5. Method design and naming
+6. Error handling
 
 Provide specific code examples for your suggestions.
 """,
@@ -483,14 +507,14 @@ Provide specific code examples for your suggestions.
         improvement_request = HumanMessage(
             content="""
 Based on the critique provided above, please improve the Page Object Models.
-Address the specific issues mentioned in the critique while maintaining the same format:
+Address the specific issues mentioned while maintaining the same format:
 
 ### 1. FileName.js
 ```javascript
-// Improved Implementation
+// Improved Implementation with enhanced verification methods
 ```
 
-Focus on implementing the suggestions from the critique.
+Focus on implementing the suggestions from the critique, especially around verification methods.
 """,
             name="User"
         )
@@ -502,7 +526,7 @@ Focus on implementing the suggestions from the critique.
         return {**state, "messages": updated_messages}
 
     def generate_test_node(state: TestGenerationState) -> TestGenerationState:
-        print("🔍 Step 4: Generating Test Script")
+        print("🔍 Step 4: Generating Test Script with Real Assertions")
         
         test_case_json = json.dumps(state["test_case"], indent=2)
         
@@ -523,52 +547,43 @@ Focus on implementing the suggestions from the critique.
                     improved_poms = msg.content
                     break
         
+        # Load MCP execution log
+        mcp_log = load_mcp_execution_log(state["test_case_id"])
+        
         test_request = HumanMessage(
             content=f"""
-    Create a Playwright test script using the Page Object Models provided in this conversation.
+Create a Playwright test script using the Page Object Models.
 
-    IMPORTANT: First extract ALL method names from the Page Object classes below, then use ONLY those exact method names.
+Page Object Models:
+{improved_poms}
 
-    Page Object Models (Latest Version):
-    {improved_poms}
+MCP EXECUTION LOG (FOLLOW THIS EXACTLY - this is what actually worked):
+```json
+{json.dumps(mcp_log, indent=2)}
+```
 
-    Test Case:
-    ```json
-    {test_case_json}
-    ```
+Test Case Context (for understanding purpose only):
+```json
+{test_case_json}
+```
 
-    Structured Steps with Expected Results:
-    ```json
-    {json.dumps(structured_steps, indent=2)}
-    ```
+CRITICAL: Follow the MCP execution log sequence exactly. Use real values from the MCP log, not the test case description.
 
-    CRITICAL REQUIREMENTS:
-    1. Extract method names from POMs above - use ONLY those exact names
-    2. Do NOT use any hardcoded values. Use fields from `testCase`
-    3. For each action, write corresponding assertions based on the expected results above
-    4. Use the structured_steps to create proper expect() statements
-    5. Follow best practices: Arrange → Act → Assert
-    6. Use ES6 module imports
-    7. NO try-catch blocks unless handling specific expected errors
-    8. NO unnecessary waits or complexity
+REQUIREMENTS:
+1. Extract method names from POMs above - use ONLY those exact names
+2. Follow the MCP log sequence exactly
+3. Use actual values from MCP log (URLs, usernames, element names)
+4. Include login sequence from MCP log
+5. Use verification methods when MCP log shows verification snapshots
+6. Use ES6 module imports
+7. Create testCase object with real data from MCP log
 
-    Example assertion pattern:
-    ```javascript
-    // After performing action: "Click on Home breadcrumb"
-    // Use expected result: "User is successfully redirected to the homepage"
-    await page.getByText("Home").click();
-    await expect(page).toHaveURL(testCase.homepageUrl);
-    await expect(page.getByText("Welcome")).toBeVisible();
-    ```
-
-    Create real assertions based on the structured_steps expected results instead of generic placeholders.
-
-    Format the output as:
-    ### N. testCase.spec.js
-    ```javascript
-    // Implementation here
-    ```
-    """,
+Format the output as:
+### N. testCase.spec.js
+```javascript
+// Implementation here
+```
+""",
             name="User"
         )
         
@@ -585,23 +600,20 @@ Focus on implementing the suggestions from the critique.
         
         test_critique_request = HumanMessage(
             content=f"""
-Review the test script generated above and suggest improvements.
+Review the test script generated above, focusing on verification usage.
 
-MCP Execution Log:
+MCP Execution Log with Verification Data:
 ```json
 {json.dumps(mcp_log, indent=2) if mcp_log else "No MCP log found"}
 ```
 
 Focus on:
-1. Replace placeholder selectors with real ones from MCP log
-2. Replace fake success messages with real verification from MCP final state
-3. Reliability and robustness
-4. Wait strategies
-5. Assertion quality
-6. Error handling
-7. Test structure
-8. Proper use of Page Object Models
-9. Adherence to the testCase value requirements
+1. Are verification methods called for steps that had expected results?
+2. Are the right verification methods used based on MCP snapshot data?
+3. Test structure and flow
+4. Proper use of Page Object Models
+5. Assertion quality and coverage
+6. Adherence to the testCase value requirements
 
 Provide specific code examples for your suggestions.
 """,
@@ -621,6 +633,8 @@ Provide specific code examples for your suggestions.
             content="""
 Based on the test critique provided above, please improve the test script.
 Address the specific issues mentioned while maintaining compatibility with the Page Object Models.
+
+Ensure verification methods are used appropriately for steps with expected results.
 
 Provide the complete improved implementation as:
 ### N. testCase.spec.js
@@ -712,15 +726,15 @@ def save_test_script(test_content, output_dir, test_case_id):
     return test_file_path
 
 # =============================================================================
-# MAIN EXECUTION FUNCTIONS (unchanged from original)
+# MAIN EXECUTION FUNCTIONS (ENHANCED)
 # =============================================================================
 
 async def generate_complete_test(test_case_id: str, output_dir: str = "complete_tests"):
-    """Complete test generation workflow"""
+    """Complete test generation workflow with conditional verification"""
     
-    print(f"🚀 Generating complete test for {test_case_id}")
+    print(f"🚀 Generating complete test with conditional verification for {test_case_id}")
     
-    # Step 1: Get test case from Azure
+    # Step 1: Get test case from configured source
     print("📚 Fetching test case...")
     test_case = await fetch_test_case(test_case_id)
     if not test_case:
@@ -729,40 +743,34 @@ async def generate_complete_test(test_case_id: str, output_dir: str = "complete_
     print(f"✅ Found: {test_case.get('title', 'Unknown')}")
     test_case_id = test_case['id']
     
-    # Step 2: Run MCP automation  
-    print("🎭 Running MCP automation...")
+    # Show structured steps info
+    structured_steps = test_case.get('structured_steps', [])
+    if structured_steps:
+        steps_with_expected = [s for s in structured_steps if s.get('expected')]
+        print(f"📋 Found {len(structured_steps)} total steps, {len(steps_with_expected)} with expected results")
+    
+    # Step 2: Run MCP automation with conditional verification
+    print("🎭 Running MCP automation with conditional verification...")
     execution_log = await run_mcp_automation(test_case_id, test_case)
     if not execution_log:
         print("❌ MCP automation failed")
         return False
-    print("✅ MCP automation completed")
-        
-    # Step 3: Extract selectors from execution log
-    print("🔍 Extracting selectors...")
-    selectors = extract_selectors(execution_log)
-    if not selectors:
-        print("❌ No selectors extracted")
-        return False
-    print(f"✅ Extracted {len(selectors)} selectors")
-    
-    # Save selectors to file
-    with open(f"{test_case_id}_selectors.json", "w") as f:
-        json.dump(selectors, f, indent=2)
+    print("✅ MCP automation completed with verification data")
         
     # Step 4: Run 6-step POM/Test generation workflow
-    print("⚙️ Running 6-step generation workflow...")
-    success = await run_workflow(test_case_id, test_case, selectors, output_dir)
+    print("⚙️ Running enhanced 6-step generation workflow...")
+    success = await run_workflow(test_case_id, test_case, output_dir)
     
     if success:
-        print(f"🎉 Complete test generation successful!")
+        print(f"🎉 Complete test generation successful with verification methods!")
         print(f"📁 Files saved in {output_dir}")
     else:
         print("❌ Workflow failed")
     
     return success
 
-async def run_workflow(test_case_id, test_case, selectors, output_dir):
-    """Run the 6-step generation workflow"""
+async def run_workflow(test_case_id, test_case, output_dir):
+    """Run the enhanced 6-step generation workflow"""
     
     try:
         # Create workflow
@@ -772,14 +780,13 @@ async def run_workflow(test_case_id, test_case, selectors, output_dir):
         initial_state = {
             "test_case_id": test_case_id,
             "test_case": test_case,
-            "selectors": selectors,
             "messages": [],
             "page_objects": [],
             "test_file": ""
         }
         
         # Run workflow
-        print("▶️ Running 6-step workflow...")
+        print("▶️ Running enhanced 6-step workflow...")
         final_state = workflow.invoke(initial_state)
         
         # Extract results
@@ -809,11 +816,11 @@ async def run_workflow(test_case_id, test_case, selectors, output_dir):
         
         if page_objects:
             save_page_objects(page_objects, pages_dir)
-            print(f"✅ Generated {len(page_objects)} page object files")
+            print(f"✅ Generated {len(page_objects)} page object files with verification methods")
         
         if test_file:
             save_test_script(test_file, tests_dir, test_case_id)
-            print(f"✅ Generated test file")
+            print(f"✅ Generated test file with verification calls")
         
         return bool(page_objects and test_file)
         
@@ -840,6 +847,8 @@ async def main():
     if len(sys.argv) < 2:
         print("Usage: python mcp_test_generator_simple.py <TEST_CASE_ID> [output_dir]")
         print("Example: python mcp_test_generator_simple.py TC-ENV-001")
+        print("Example: python mcp_test_generator_simple.py TestCaseFile.txt")
+        print("Example: python mcp_test_generator_simple.py 12345  # Azure DevOps work item")
         return
         
     test_case_id = sys.argv[1]
