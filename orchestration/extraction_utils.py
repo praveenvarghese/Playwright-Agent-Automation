@@ -36,10 +36,23 @@ def extract_page_objects_from_specialized(response):
     """Extract page objects from JSON format response."""
     page_objects = []
     
-    # Look for JSON blocks in the response
+    # Try JSON with markdown blocks first
     json_pattern = r'```json\s*(.*?)```'
     json_matches = re.findall(json_pattern, response, re.DOTALL | re.IGNORECASE)
     
+    # If no markdown blocks, try parsing the entire response as JSON
+    if not json_matches:
+        try:
+            data = json.loads(response.strip())
+            if isinstance(data, dict) and 'files' in data:
+                for file_info in data['files']:
+                    if file_info.get('path', '').startswith('pages/') and file_info.get('content'):
+                        page_objects.append(file_info['content'].strip())
+                return page_objects
+        except json.JSONDecodeError:
+            pass
+    
+    # Process markdown-wrapped JSON
     for json_text in json_matches:
         try:
             data = json.loads(json_text.strip())
@@ -47,7 +60,7 @@ def extract_page_objects_from_specialized(response):
                 for file_info in data['files']:
                     if file_info.get('path', '').startswith('pages/') and file_info.get('content'):
                         page_objects.append(file_info['content'].strip())
-                break  # Found valid JSON, stop looking
+                break
         except json.JSONDecodeError:
             continue
     

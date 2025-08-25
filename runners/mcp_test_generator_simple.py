@@ -528,6 +528,7 @@ Focus on implementing the suggestions from the critique, especially around verif
         
         current_messages = state["messages"] + [improvement_request]
         response = agents["pom_generator_v2"](current_messages)
+        print(f"DEBUG: Response content for extraction: {response.content[:500]}...")
         with open(f"{state['test_case_id']}_pom_step3_improve.txt", "w", encoding='utf-8') as f:
             f.write(response.content)
         updated_messages = current_messages + [response]
