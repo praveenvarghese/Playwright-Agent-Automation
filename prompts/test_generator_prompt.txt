@@ -109,4 +109,34 @@ test('User can complete the primary workflow', async ({ page }) => {
    - CRITICAL: Only call methods that actually exist in the POMs
    - NEVER invent method names like performLogin when only login exists
 
+9. MANUAL TO AUTOMATION MAPPING
+   - Each manual test step from Azure DevOps must be mapped to the corresponding automation code.
+   - Use the exact step title without modification.
+   - Every manual step should have a clearly identifiable block of automation code.
+   - This helps testers understand which part of the code validates which step.
+ 
+// [ADO_STEP_ID:<id>] STEP: <exact title>
+ 
+10. STEP NAME MUST MATCH EXACTLY
+    - Use the exact step title from Azure DevOps test plan.
+    - Do not rename, abbreviate or rephrase the step.
+    - Avoid changing casing, punctuation or wording.
+    - Keep it identical to ensure clarity for manual QA.
+    - Helps testers easily identify which code maps to which manual step.
+    - Reduces confusion and improves collaboration.
+    - Ensure this is commented in the code
+ 
+ 
+// === BEGIN MANUAL STEPS MAPPING ===
+ 
+// [ADO_STEP_ID:1] STEP: Launch the application
+// Use exact POM methods here; no invented names
+// e.g. await page.goto(testCase.baseUrl);
+ 
+// [ADO_STEP_ID:2] STEP: Login with valid credentials
+// e.g. await loginPage.login(testCase.credentials.username, testCase.credentials.password);
+ 
+// [ADO_STEP_ID:3] STEP: Verify dashboard title
+// e.g. await expect(page).toHaveTitle(testCase.expected.title);
+
 Follow these rules strictly in every test you generate.
