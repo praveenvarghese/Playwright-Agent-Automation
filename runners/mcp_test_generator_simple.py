@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import sys
+from urllib import response
 import warnings
 import re
 from typing import TypedDict, List
@@ -199,12 +200,7 @@ From snapshot: `- textbox "Username" [active] [ref=e21]`
 Correct ref: `"e21"`
 Wrong ref: `"textbox \"Username\" [active] [ref=e21]"`
 
-PREREQUISITE STEPS:
-1. Navigate to the application URL
-2. Wait for page to load
-3. Look for login form elements using CSS selectors (input[name="username"], etc.)
-4. Fill in username with the provided credentials
-5. Fill in password and submit
+Execute all steps from the MCP log as part of the main test workflow, including login actions.
 
 {step_instructions}
 
@@ -471,6 +467,8 @@ Format each file as:
         
         current_messages = state.get("messages", []) + [initial_message]
         response = agents["pom_generator_v2"](current_messages)
+        with open(f"{state['test_case_id']}_pom_step1_generate.txt", "w", encoding='utf-8') as f:
+            f.write(response.content)
         updated_messages = current_messages + [response]
         
         return {**state, "messages": updated_messages}
@@ -478,9 +476,15 @@ Format each file as:
     def critique_pom_node(state: TestGenerationState) -> TestGenerationState:
         print("🔍 Step 2: Critiquing Page Object Models")
         
+        execution_log = load_mcp_execution_log(state["test_case_id"])
+        execution_json = json.dumps(execution_log, indent=2) if execution_log else "No MCP execution log available"
         critique_request = HumanMessage(
-            content="""
-Review the Page Object Models generated above, focusing on verification methods.
+        content=f"""
+Review the Page Object Models generated above, focusing on page separation and URL boundaries.
+
+MCP Execution Log (for URL path analysis):
+```json
+{execution_json}
 
 Focus on:
 1. Do verification methods match the expected results from the test case?
@@ -489,6 +493,7 @@ Focus on:
 4. Selector strategies
 5. Method design and naming
 6. Error handling
+7. CRITICAL: Are actions from different URL paths mixed in the same page class?
 
 Provide specific code examples for your suggestions.
 """,
@@ -497,6 +502,8 @@ Provide specific code examples for your suggestions.
         
         current_messages = state["messages"] + [critique_request]
         response = agents["pom_critic_v2"](current_messages)
+        with open(f"{state['test_case_id']}_pom_step2_critique.txt", "w", encoding='utf-8') as f:
+            f.write(response.content)
         updated_messages = current_messages + [response]
         
         return {**state, "messages": updated_messages}
@@ -521,6 +528,8 @@ Focus on implementing the suggestions from the critique, especially around verif
         
         current_messages = state["messages"] + [improvement_request]
         response = agents["pom_generator_v2"](current_messages)
+        with open(f"{state['test_case_id']}_pom_step3_improve.txt", "w", encoding='utf-8') as f:
+            f.write(response.content)
         updated_messages = current_messages + [response]
         
         return {**state, "messages": updated_messages}
@@ -694,11 +703,12 @@ Ensure all critique points are addressed and the test follows best practices.
     return workflow.compile()
 
 def save_page_objects(page_objects, output_dir):
-    """Save page objects to files"""
+    """Save page objects to files - extract class names from JSON content."""
     os.makedirs(output_dir, exist_ok=True)
     
     saved_files = []
     for i, code_block in enumerate(page_objects):
+        # Extract class name from the actual code content
         match = re.search(r'export class\s+(\w+)', code_block)
         if match:
             filename = f"{match.group(1)}.js"

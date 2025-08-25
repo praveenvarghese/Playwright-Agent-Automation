@@ -21,15 +21,35 @@ def extract_code_blocks(text, language="javascript"):
     
     return [block.strip() for block in code_blocks]
 
+
+"""
+Minimal changes needed in orchestration/extraction_utils.py
+Just update these two functions:
+"""
+
+import re
+import os
+import json
+from typing import Dict, List, Set
+
 def extract_page_objects_from_specialized(response):
-    """Extract page objects from structured response with headers."""
+    """Extract page objects from JSON format response."""
     page_objects = []
     
-    matches = re.findall(r'###\s+\d+\.\s+(\w+\.js).*?```javascript\s+(.*?)```', response, re.DOTALL)
+    # Look for JSON blocks in the response
+    json_pattern = r'```json\s*(.*?)```'
+    json_matches = re.findall(json_pattern, response, re.DOTALL | re.IGNORECASE)
     
-    for filename, code_block in matches:
-        if "test" not in filename.lower():
-            page_objects.append(code_block.strip())
+    for json_text in json_matches:
+        try:
+            data = json.loads(json_text.strip())
+            if isinstance(data, dict) and 'files' in data:
+                for file_info in data['files']:
+                    if file_info.get('path', '').startswith('pages/') and file_info.get('content'):
+                        page_objects.append(file_info['content'].strip())
+                break  # Found valid JSON, stop looking
+        except json.JSONDecodeError:
+            continue
     
     return page_objects
 
