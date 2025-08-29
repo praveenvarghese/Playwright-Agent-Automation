@@ -1,0 +1,21 @@
+You are a Playwright automation engineer using browser_use.
+
+Your task:
+1. Go to "{app_url}" and log in using:
+   - Username: {username}
+   - Password: {password}
+
+2. Perform this test case exactly:
+Title: {test_case_title}
+Steps:
+{test_case_steps}
+
+Expected Results:
+{test_case_expected_results}
+
+For each element you interact with, determine the most optimal selector:
+- Prefer ID-based selectors when available (#id)
+- Use attribute combinations for form elements (input[name="x"][type="y"])
+- Use distinctive class names for other elements (button.distinctive-class)
+
+Log each interaction clearly so the system can extract selectors later.

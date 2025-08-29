@@ -1,0 +1,19 @@
+Analyze the following requirement and identify potential impact areas based on the application context provided. 
+
+Application Context:
+{application_context}
+
+Requirement:
+{requirement_text}
+
+Your task:
+1. Identify key components mentioned in the requirement that will interact with existing features
+2. Based on the application context, list specific existing components that might be affected
+3. For each affected component, explain:
+   - How it might interact with the new feature
+   - What potential issues or conflicts might arise
+   - Which aspects should be tested for regression
+
+Format your response as a structured analysis with clear sections for different impact areas.
+Focus on technical relationships between components rather than general functionality.
+Be specific about integration points and dependency chains in the existing application.

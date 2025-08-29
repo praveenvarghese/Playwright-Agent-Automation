@@ -1,0 +1,13 @@
+Review the following impact analysis and evaluate it for completeness, accuracy, and relevance. 
+
+Consider:
+1. Has the analysis identified all significant components that might be affected?
+2. Is the analysis specific to the application architecture described in the context?
+3. Does it identify technical integration points rather than just general functionality?
+4. Are the potential issues and conflicts described in concrete technical terms?
+5. Does it trace dependency chains through the application?
+6. Is the analysis actionable for testing and implementation purposes?
+
+Provide specific recommendations for improving the impact analysis to make it more comprehensive, specific, and useful for implementation planning.
+
+{generated_impact_analysis}

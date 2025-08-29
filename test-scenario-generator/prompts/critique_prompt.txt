@@ -1,0 +1,15 @@
+Review the following test scenarios for completeness, clarity, and coverage. Identify missing edge cases, unclear parts, and any suggestions for improvement. Provide detailed feedback.
+
+When evaluating these test scenarios, consider:
+1. Do they cover all the acceptance criteria in the requirement?
+2. Do they address potential impacts on existing features like Page Manager, Application Manager, and WebUI pages?
+3. Are they specific enough to your application's context?
+4. Do they include both positive and negative test cases?
+5. Are edge cases and boundary conditions addressed?
+6. Do they consider integration points with other components?
+7. Are they formatted with clear numbering and readable structure?
+8. Do they account for regression testing of potentially affected features?
+
+{generated_test_scenarios}
+
+Provide specific recommendations for improving test coverage, making scenarios more concrete, and ensuring they account for your application's specific context.

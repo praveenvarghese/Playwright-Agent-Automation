@@ -1,0 +1,16 @@
+Compare these two acceptance criteria and determine if they have the same meaning or different meanings:
+
+Original: "{original_criteria}"
+New: "{new_criteria}"
+
+Respond with:
+1. Are they semantically equivalent (Yes/No)?
+2. If different, how significant is the change (Low/Medium/High)?
+3. Brief explanation of the difference
+
+Guidelines for significance levels:
+- Low: Minor wording changes that don't affect the meaning (e.g., rephrasing)
+- Medium: Additional details or clarifications that extend but don't change core meaning
+- High: Fundamental changes to requirements or functionality being tested
+
+Please provide a structured response with clear Yes/No for equivalence and Low/Medium/High for significance.

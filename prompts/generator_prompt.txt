@@ -1,8 +1,0 @@
-For each identified requirement, generate 2 simple test cases that include only:
-
-1. Test Case ID: TC-ENV-[Number] (Use only letters, numbers, underscore, dash, or equal sign)
-2. Test Case Title: Clear, action-oriented title
-3. Test Steps: Numbered, specific user actions (no more than 5 steps per test case)
-4. Expected Results: Observable outcomes
-
-Focus on the most basic, core functionality test cases. Do not include preconditions, test data, assertion points, or test categories. Keep the test cases simple and straightforward.

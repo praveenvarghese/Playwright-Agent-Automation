@@ -1,0 +1,35 @@
+I need to update this test case to reflect changes in requirements:
+
+Original Test Case:
+- ID: {test_case_id}
+- Title: {test_case_title}
+- Steps: {test_case_steps}
+- Expected Results: {test_case_expected_results}
+
+The following requirements have changed:
+{changed_requirements}
+
+IMPORTANT CONSTRAINTS:
+1. The updated test case MUST have 5 or fewer steps total.
+2. If testing requires more than 5 steps, focus only on the main scenario.
+3. Expected results MUST be a single string, not an array or list.
+4. If negative testing is needed, it should be in a separate test case.
+
+Please update the test case title, steps, and expected results to reflect these requirement changes.
+Keep the same ID and format. Preserve as much of the original test case as possible while ensuring
+it correctly tests the new requirements.
+
+Return the updated test case in this format:
+```json
+{
+  "id": "TC-...",
+  "title": "Updated title",
+  "steps": [
+    "1. Step 1",
+    "2. Step 2",
+    "3. Step 3",
+    "4. Step 4",
+    "5. Step 5"
+  ],
+  "expectedResults": "Updated expected results"
+}

@@ -1,0 +1,27 @@
+You are a Test Case Optimizer. Optimize this test case to ensure it perfectly aligns with the new requirements.
+
+Test Case:
+```json
+{current_test_case}
+```
+
+The requirements that changed:
+{changed_requirements}
+
+CRITICAL REQUIREMENTS:
+1. The test case MUST have 5 or fewer steps. This is a HARD REQUIREMENT.
+2. Expected results MUST be a single string, not an array or list.
+
+Your task is to:
+1. Ensure perfect consistency between title, steps, and expected results
+2. Make sure the test case effectively tests the NEW requirements
+3. Polish the language for clarity and precision
+4. Remove any remaining traces of the old requirements
+5. Ensure environment names follow the new format requirements
+6. If there are more than 5 steps, keep ONLY the most essential 5 steps
+
+When a test case references a criteria it's not mapped to, either:
+1. Add the missing criteria mapping, OR
+2. Remove the reference to that criteria from the test case content
+
+Return the optimized test case in the same JSON format.
