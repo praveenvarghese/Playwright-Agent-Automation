@@ -24,3 +24,5 @@ aiohttp
 
 tree-sitter==0.25.1
 tree-sitter-typescript==0.23.2
+
+pydantic==2.11.7

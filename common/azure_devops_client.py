@@ -109,7 +109,7 @@ def _map_azure_workitem_to_testcase(work_item):
         'expectedResults': _clean_html(expected_results),
         'source': 'azure_devops',
         'metadata': {
-            'work_item_id': work_item_id,
+            'work_item_id': str(work_item_id),
             'work_item_type': work_item_type,
             'work_item_url': work_item.get('_links', {}).get('html', {}).get('href', ''),
             'state': fields.get('System.State', ''),
