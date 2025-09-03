@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Playwright Test Generator - Main Entry Point
-Refactored for better maintainability
+Refactored for better maintainability with JSON validation
 """
 
 import asyncio
@@ -29,7 +29,7 @@ from common.test_case_fetcher import fetch_test_case
 from mcp_helpers.automation_runner import run_mcp_automation
 from orchestration.workflow_builder import create_pom_test_workflow
 from orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized
-from common.validation_helpers import setup_environment, check_pydantic_models
+from common.validation_helpers import setup_environment, check_dependencies
 from common.file_utils import save_page_objects, save_test_script
 
 # =============================================================================
@@ -77,13 +77,11 @@ async def generate_complete_test(test_case_id: str, output_dir: str = "complete_
     return success
 
 async def run_workflow(test_case_id, test_case, output_dir):
-    """Run the enhanced 6-step generation workflow"""
+    """Run the enhanced 6-step generation workflow (UPDATED: cleaned up)"""
     
     try:
-        # Create workflow
         workflow = create_pom_test_workflow()
         
-        # Define initial state
         initial_state = {
             "test_case_id": test_case_id,
             "test_case": test_case,
@@ -92,30 +90,12 @@ async def run_workflow(test_case_id, test_case, output_dir):
             "test_file": ""
         }
         
-        # Run workflow
-        print("▶️ Running enhanced 6-step workflow...")
+        print("▶️ Running enhanced 6-step workflow with validation...")
         final_state = workflow.invoke(initial_state)
         
-        # Extract results
+        # UPDATED: Simplified extraction - no fallbacks needed
         page_objects = final_state.get("page_objects", [])
         test_file = final_state.get("test_file", "")
-        
-        # If no results, try extracting from messages
-        if not page_objects and final_state.get("messages"):
-            # Find improved POM response
-            for msg in final_state["messages"]:
-                if hasattr(msg, 'name') and 'POM' in str(msg.name):
-                    page_objects = extract_page_objects_from_specialized(msg.content)
-                    if page_objects:
-                        break
-        
-        if not test_file and final_state.get("messages"):
-            # Find test response  
-            for msg in reversed(final_state["messages"]):
-                if hasattr(msg, 'name') and 'Test' in str(msg.name):
-                    test_file = extract_test_script_from_specialized(msg.content)
-                    if test_file:
-                        break
         
         # Save results
         pages_dir = os.path.join(output_dir, "pages")
@@ -123,11 +103,11 @@ async def run_workflow(test_case_id, test_case, output_dir):
         
         if page_objects:
             save_page_objects(page_objects, pages_dir)
-            print(f"✅ Generated {len(page_objects)} page object files with validation")
+            print(f"✅ Generated {len(page_objects)} page object files")
         
         if test_file:
             save_test_script(test_file, tests_dir, test_case_id)
-            print(f"✅ Generated test file with validation")
+            print(f"✅ Generated test file with method validation")
         
         return bool(page_objects and test_file)
         
@@ -138,7 +118,7 @@ async def run_workflow(test_case_id, test_case, output_dir):
         return False
 
 async def main():
-    """Main entry point with enhanced validation"""
+    """Main entry point (UPDATED: cleaned up validation)"""
     if len(sys.argv) < 2:
         print("Usage: python mcp_test_generator_simple.py <TEST_CASE_ID> [output_dir]")
         print("Example: python mcp_test_generator_simple.py TC-ENV-001")
@@ -149,8 +129,8 @@ async def main():
     test_case_id = sys.argv[1]
     output_dir = sys.argv[2] if len(sys.argv) > 2 else "complete_tests"
     
-    # Check Pydantic models availability
-    if not check_pydantic_models():
+    # UPDATED: Use renamed function
+    if not check_dependencies():
         sys.exit(1)
     
     setup_environment()

@@ -67,9 +67,31 @@ def extract_page_objects_from_specialized(response):
     return page_objects
 
 def extract_test_script_from_specialized(response):
-    """Extract test script from structured response with headers."""
-    matches = re.findall(r'###\s+\d+\.\s+testCase\.spec\.js.*?```javascript\s+(.*?)```', response, re.DOTALL)
+    """Extract test script from JSON format response (NEW: standardized with POM extraction)."""
+    # Try JSON with markdown blocks first
+    json_pattern = r'```json\s*(.*?)```'
+    json_matches = re.findall(json_pattern, response, re.DOTALL | re.IGNORECASE)
     
+    # If no markdown blocks, try parsing the entire response as JSON
+    if not json_matches:
+        try:
+            data = json.loads(response.strip())
+            if isinstance(data, dict) and 'test_file' in data:
+                return data['test_file'].get('content', '').strip()
+        except json.JSONDecodeError:
+            pass
+    
+    # Process markdown-wrapped JSON
+    for json_text in json_matches:
+        try:
+            data = json.loads(json_text.strip())
+            if isinstance(data, dict) and 'test_file' in data:
+                return data['test_file'].get('content', '').strip()
+        except json.JSONDecodeError:
+            continue
+    
+    # Fallback: try old regex pattern for backward compatibility
+    matches = re.findall(r'###\s+\d+\.\s+.*?\.spec\.js.*?```javascript\s+(.*?)```', response, re.DOTALL)
     if matches:
         return matches[0].strip()
     
@@ -147,3 +169,22 @@ def create_method_validation_prompt(pom_content: str) -> str:
     validation_text += "\n⚠️ CRITICAL: Only call methods listed above. Do not invent new method names."
     
     return validation_text
+
+def extract_all_pom_methods_from_conversation(messages) -> Dict[str, List[str]]:
+    """Extract all POM methods from conversation history (NEW: for test validation)"""
+    all_methods = {}
+    
+    for msg in messages:
+        if hasattr(msg, 'name') and 'POM' in str(msg.name):
+            # Extract POMs from this message
+            pom_blocks = extract_page_objects_from_specialized(msg.content)
+            for pom_block in pom_blocks:
+                methods = extract_pom_methods(pom_block)
+                all_methods.update(methods)
+    
+    return all_methods
+
+def validate_test_against_poms(test_content: str, pom_methods: Dict[str, List[str]]) -> List[str]:
+    """Validate generated test against available POM methods (NEW)"""
+    test_calls = extract_test_method_calls(test_content)
+    return validate_method_consistency(pom_methods, test_calls)
