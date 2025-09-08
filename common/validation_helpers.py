@@ -72,7 +72,7 @@ def setup_environment():
     """Validate required environment variables"""
     required_vars = [
         "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", 
-        "AZURE_OPENAI_DEPLOYMENT_NAME", "APP_URL", "APP_USERNAME", "APP_PASSWORD"
+        "AZURE_OPENAI_DEPLOYMENT_NAME", "APP_URL", "APP_EMAIL", "APP_PASSWORD"
     ]
     
     missing = [var for var in required_vars if not os.getenv(var)]

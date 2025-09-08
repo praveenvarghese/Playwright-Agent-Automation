@@ -1,5 +1,5 @@
 """
-MCP automation execution with conditional verification
+Optimized MCP automation execution with structured login and better error handling
 """
 
 import json
@@ -8,7 +8,7 @@ from openai import AzureOpenAI
 from mcp_helpers.mcp_manager import WorkingMCPManager
 
 async def run_mcp_automation(test_case_id, test_case):
-    """Run MCP automation using proven approach"""
+    """Run MCP automation using optimized approach"""
     manager = WorkingMCPManager()
     execution_log = []
     
@@ -16,7 +16,7 @@ async def run_mcp_automation(test_case_id, test_case):
         print("🎭 Starting MCP automation")
         await manager.start_server()
         
-        execution_log = await execute_with_conditional_verification(manager, test_case_id, test_case)
+        execution_log = await execute_optimized_test(manager, test_case_id, test_case)
         
         # Save execution log
         with open(f"{test_case_id}_mcp_execution_log.json", "w") as f:
@@ -31,115 +31,154 @@ async def run_mcp_automation(test_case_id, test_case):
     finally:
         await manager.cleanup()
 
-async def execute_with_conditional_verification(manager, test_case_id, test_case):
-    """Execute test with conditional verification based on Azure DevOps expected results"""
+async def execute_optimized_test(manager, test_case_id, test_case):
+    """Execute test with optimized login and structured execution"""
     client = AzureOpenAI(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version="2024-02-15-preview"
     )
     
-    # Check for structured steps with expected results
+    execution_log = []
+    
+    # Phase 1: Login (separate optimized flow)
+    print("🔐 Phase 1: Login")
+    login_log = await execute_login_phase(manager, client)
+    execution_log.extend(login_log)
+    
+    # Phase 2: Execute test steps
+    print("🧪 Phase 2: Test Execution")
+    test_log = await execute_test_phase(manager, client, test_case)
+    execution_log.extend(test_log)
+    
+    return execution_log
+
+async def execute_login_phase(manager, client):
+    """Optimized login phase with direct instructions"""
+    
+    login_prompt = f"""
+Execute login sequence efficiently:
+
+APPLICATION: {os.getenv('APP_URL')}
+CREDENTIALS: Username={os.getenv('APP_EMAIL')}, Password={os.getenv('APP_PASSWORD')}
+
+EXECUTE THIS EXACT SEQUENCE:
+1. navigate_to: {os.getenv('APP_URL')}
+2. browser_snapshot (capture login page)
+3. type_text: email field with "{os.getenv('APP_EMAIL')}"
+4. type_text: password field with "{os.getenv('APP_PASSWORD')}"  
+5. click_element: login/submit button
+6. browser_snapshot (verify login success)
+
+STOP after login is complete and you see the main application page.
+"""
+
+    system_msg = """You are a login automation specialist. Execute login steps efficiently:
+
+CRITICAL RULES:
+- Use ONLY the ref ID (e.g., 'e21') for MCP tool parameters
+- Execute steps in exact sequence provided
+- Take snapshots only when specified
+- STOP immediately after successful login
+
+LOGIN TOOLS PRIORITY:
+1. navigate_to - Go to login page
+2. browser_snapshot - Capture current state
+3. type_text - Enter credentials  
+4. click_element - Click login button
+5. browser_snapshot - Verify success
+
+Focus on speed and efficiency. Do not overthink or add extra steps."""
+
+    return await execute_phase(manager, client, login_prompt, system_msg, max_iterations=8, phase_name="LOGIN")
+
+async def execute_test_phase(manager, client, test_case):
+    """Execute main test steps after login"""
+    
+    # Check for structured steps
     structured_steps = test_case.get('structured_steps', [])
     
     if structured_steps:
-        # Build conditional verification instructions
-        detailed_steps = "\n🎯 EXECUTE EACH STEP WITH CONDITIONAL VERIFICATION:\n"
-        for step in structured_steps:
-            detailed_steps += f"\n--- STEP {step['step']} ---\n"
-            detailed_steps += f"ACTION: {step['action']}\n"
+        # Build detailed test instructions
+        test_instructions = "EXECUTE THESE TEST STEPS IN ORDER:\n\n"
+        for i, step in enumerate(structured_steps, 1):
+            test_instructions += f"STEP {i}:\n"
+            test_instructions += f"Action: {step['action']}\n"
             if step.get('expected'):
-                detailed_steps += f"EXPECTED RESULT: {step['expected']}\n"
-                detailed_steps += f"🔍 AFTER ACTION: Take browser_snapshot and verify that {step['expected']}\n"
-                detailed_steps += f"📝 EXPLAIN: Compare the snapshot with expected result and explain if it matches\n"
-            else:
-                detailed_steps += f"🔍 AFTER ACTION: Take browser_snapshot to capture current state for logging\n"
-        step_instructions = detailed_steps
-        print(f"📋 Using {len(structured_steps)} structured steps with conditional verification")
+                test_instructions += f"Expected: {step['expected']}\n"
+                test_instructions += f"✅ VERIFY: Take browser_snapshot and confirm {step['expected']}\n"
+            test_instructions += "\n"
+        
+        test_instructions += f"\nOVERALL EXPECTED RESULT:\n{test_case.get('expectedResults', '')}\n"
+        
+        print(f"📋 Executing {len(structured_steps)} structured test steps")
     else:
         # Fallback to basic steps
-        step_instructions = f"\nTEST STEPS:\n{test_case.get('steps', '')}"
-        print("📋 Using basic steps format")
-    
-    test_prompt = f"""
-Execute this test case step by step with conditional verification:
+        test_instructions = f"""
+EXECUTE THESE TEST STEPS:
+{test_case.get('steps', '')}
 
-CONTEXT:
-- Application URL: {os.getenv('APP_URL')}
-- Username: {os.getenv('APP_USERNAME')}
-- Password: {os.getenv('APP_PASSWORD')}
-
-🚨 CRITICAL INSTRUCTIONS:
-1. Use Playwright locator methods for all interactions (getByRole, getByText, getByLabel)
-2. When using MCP tools with 'ref' parameter, use ONLY the short ID (e.g., 'e21', not 'textbox "Username" [ref=e21]')
-3. After EACH action, use browser_snapshot to capture page state
-4. IF step has EXPECTED RESULT: Compare snapshot with expected and explain if it matches
-5. IF step has NO expected result: Just capture snapshot for logging
-
-REFERENCE FORMAT EXAMPLE:
-From snapshot: `- textbox "Username" [active] [ref=e21]`
-Correct ref: `"e21"`
-Wrong ref: `"textbox \"Username\" [active] [ref=e21]"`
-
-Execute all steps from the MCP log as part of the main test workflow, including login actions.
-
-{step_instructions}
-
-OVERALL EXPECTED RESULTS:
+EXPECTED RESULTS:
 {test_case.get('expectedResults', '')}
+"""
+        print("📋 Executing basic test steps")
 
-Continue until all test steps are completed or you encounter an error.
+    test_prompt = f"""
+You are already logged into the application. Execute the test case:
+
+{test_instructions}
+
+IMPORTANT:
+- Application is already loaded and you are logged in
+- Execute ALL test steps completely
+- Use browser_snapshot after each major action
+- Verify results against expected outcomes
+- Continue until ALL steps are completed or you encounter a blocking error
 """
 
-    system_msg = """You are executing a test case using Playwright MCP tools with conditional verification.
+    system_msg = """You are executing test steps on an already logged-in application.
 
-🚨 CRITICAL MCP REFERENCE FORMAT:
-When using MCP tools that require 'ref' parameter:
-- ONLY use the short reference ID (e.g., 'e21', 'e26', 'e27')  
-- DO NOT use the full description like 'textbox "Password" [ref=e26]'
-- Extract ONLY the 'e' number from the snapshot
+EXECUTION RULES:
+- User is ALREADY logged in - do not attempt login again
+- Execute ALL provided test steps in sequence
+- Use browser_snapshot after each significant action
+- When encountering errors, try alternative approaches before giving up
+- Continue until test is complete or you hit an unrecoverable error
 
-Example from snapshot:
-```yaml
-- textbox "Username" [active] [ref=e21]
-```
-Correct tool call:
-```json
-{"element": "Username", "ref": "e21", "text": "admin"}
-```
+MCP REFERENCE FORMAT:
+- Extract ONLY the ref ID (e.g., 'e21') from snapshots
+- Use clear, descriptive element identification
+- Handle dynamic elements gracefully
 
-ENHANCED EXECUTION FLOW:
-1. Execute each action (click, type, navigate)
-2. ALWAYS use browser_snapshot after each action to capture page state
-3. IF the step has an expected result: Analyze snapshot and verify if expectation is met
-4. IF no expected result: Just capture snapshot for logging
-5. Continue to next step
+PERSISTENCE STRATEGY:
+- If an element is not found, take a snapshot to see current page state
+- Try alternative locators (text, role, label)
+- Wait for elements to load if needed
+- Report specific errors with context"""
 
-Always provide detailed technical information about:
-- CSS selectors used
-- Actions performed 
-- Values entered
-- Page state captured in snapshots
-- Verification results (when expected results exist)
+    return await execute_phase(manager, client, test_prompt, system_msg, max_iterations=20, phase_name="TEST")
 
-Continue until all test steps are completed or you encounter an error."""
-
+async def execute_phase(manager, client, prompt, system_msg, max_iterations, phase_name):
+    """Execute a specific phase with proper error handling"""
+    
     conversation_history = [
         {"role": "system", "content": system_msg},
-        {"role": "user", "content": test_prompt}
+        {"role": "user", "content": prompt}
     ]
     
-    execution_log = []
-    max_iterations = 25
+    phase_log = []
     iteration = 0
+    consecutive_errors = 0
+    max_consecutive_errors = 3
 
-    print("🧪 Starting AI-driven test execution with conditional verification...")
+    print(f"🚀 Starting {phase_name} phase...")
 
     while iteration < max_iterations:
         iteration += 1
-        print(f"--- Iteration {iteration} ---")
+        print(f"--- {phase_name} Iteration {iteration}/{max_iterations} ---")
 
         try:
+            # Get available tools
             tools = []
             for tool in manager.available_tools:
                 tools.append({
@@ -151,6 +190,7 @@ Continue until all test steps are completed or you encounter an error."""
                     }
                 })
 
+            # Make API call
             response = client.chat.completions.create(
                 model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
                 messages=conversation_history,
@@ -160,46 +200,97 @@ Continue until all test steps are completed or you encounter an error."""
             )
 
             message = response.choices[0].message
-
+            
+            # Add assistant message to history
             conversation_history.append({
                 "role": "assistant",
                 "content": message.content,
                 "tool_calls": message.tool_calls if message.tool_calls else None
             })
 
+            # Execute tool calls if any
             if message.tool_calls:
+                tools_executed = 0
                 for tool_call in message.tool_calls:
                     tool_name = tool_call.function.name
                     try:
                         args = json.loads(tool_call.function.arguments)
-                    except:
+                    except json.JSONDecodeError as e:
+                        print(f"⚠️ JSON decode error: {e}")
                         args = {}
                     
+                    # Execute tool
                     result = await manager.execute_tool(tool_name, args)
+                    tools_executed += 1
                     
-                    # Enhanced logging with verification tracking
+                    # Log execution
                     log_entry = {
+                        "phase": phase_name,
+                        "iteration": iteration,
                         "tool": tool_name,
                         "args": args,
                         "result": result.get("result", {}),
-                        "description": f"{tool_name} called with arguments {args}",
-                        "is_verification": tool_name == "browser_snapshot"
+                        "success": "error" not in result,
+                        "timestamp": iteration
                     }
-                    execution_log.append(log_entry)
+                    phase_log.append(log_entry)
 
+                    # Add tool result to conversation
                     conversation_history.append({
                         "role": "tool",
                         "content": json.dumps(result),
                         "tool_call_id": tool_call.id
                     })
-                continue
+                
+                print(f"✅ Executed {tools_executed} tools")
+                consecutive_errors = 0  # Reset error counter on successful execution
+                
             else:
-                print(f"🤖 AI completed: {message.content}")
-                break
+                # AI has finished this phase
+                print(f"🎯 {phase_name} phase completed: {message.content}")
+                
+                # Check if this is actual completion or premature exit
+                if phase_name == "LOGIN" and "login" in message.content.lower():
+                    print("✅ Login phase completed successfully")
+                    break
+                elif phase_name == "TEST" and any(word in message.content.lower() for word in ["completed", "finished", "done", "success"]):
+                    print("✅ Test phase completed successfully")
+                    break
+                else:
+                    # Encourage continuation if it seems incomplete
+                    if iteration < max_iterations - 2:  # Don't add if near limit
+                        conversation_history.append({
+                            "role": "user",
+                            "content": "Continue with the next step if there are more actions to perform."
+                        })
+                        continue
+                    else:
+                        print("⚠️ Reached iteration limit")
+                        break
 
         except Exception as e:
-            print(f"❌ Error in iteration {iteration}: {e}")
-            break
+            print(f"❌ Error in {phase_name} iteration {iteration}: {e}")
+            consecutive_errors += 1
+            
+            # Add error recovery
+            error_log = {
+                "phase": phase_name,
+                "iteration": iteration,
+                "error": str(e),
+                "consecutive_errors": consecutive_errors
+            }
+            phase_log.append(error_log)
+            
+            # If too many consecutive errors, try to recover
+            if consecutive_errors >= max_consecutive_errors:
+                print(f"🔄 Too many consecutive errors, attempting recovery...")
+                conversation_history.append({
+                    "role": "user", 
+                    "content": "There have been errors. Please take a browser_snapshot to see the current state and continue from there."
+                })
+                consecutive_errors = 0  # Reset counter after recovery attempt
+            
+            continue
 
-    print(f"✅ Test execution completed after {iteration} iterations")
-    return execution_log
+    print(f"📊 {phase_name} phase completed after {iteration} iterations")
+    return phase_log
