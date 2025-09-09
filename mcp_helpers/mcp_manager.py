@@ -89,6 +89,20 @@ class WorkingMCPManager:
         if not self.server_started or not self.session:
             raise Exception("MCP server not started or session not available")
         
+        # Add intelligent waits based on tool type
+        if tool_name == "navigate_to":
+            print("⏳ Pre-navigation wait...")
+            await asyncio.sleep(1)
+        elif tool_name == "click_element":
+            print("⏳ Pre-click wait for element readiness...")
+            await asyncio.sleep(2)
+        elif tool_name == "type_text":
+            print("⏳ Pre-type wait...")
+            await asyncio.sleep(1)
+        elif tool_name == "browser_snapshot":
+            print("⏳ Pre-snapshot wait for page settle...")
+            await asyncio.sleep(2)
+        
         max_tool_retries = 2
         tool_retry = 0
         
@@ -137,6 +151,17 @@ class WorkingMCPManager:
                             print(f"📄 {text}")
                     elif "data" in item:
                         print("📄 [Binary data received]")
+                
+                # Add intelligent waits after tool execution based on tool type
+                if tool_name == "navigate_to":
+                    print("⏳ Post-navigation wait for page load...")
+                    await asyncio.sleep(5)
+                elif tool_name == "click_element":
+                    print("⏳ Post-click wait for page transition...")
+                    await asyncio.sleep(3)
+                elif tool_name == "type_text":
+                    print("⏳ Post-type wait...")
+                    await asyncio.sleep(1)
                 
                 return formatted_result
                 

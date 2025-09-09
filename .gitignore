@@ -6,3 +6,4 @@ logs
 output
 playwright_tests
 .env
+*log.json

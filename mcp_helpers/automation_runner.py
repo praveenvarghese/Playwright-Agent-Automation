@@ -65,7 +65,7 @@ CREDENTIALS: Username={os.getenv('APP_EMAIL')}, Password={os.getenv('APP_PASSWOR
 EXECUTE THIS EXACT SEQUENCE:
 1. navigate_to: {os.getenv('APP_URL')}
 2. browser_snapshot (capture login page)
-3. type_text: email field with "{os.getenv('APP_EMAIL')}"
+3. type_text: username field with "{os.getenv('APP_EMAIL')}"
 4. type_text: password field with "{os.getenv('APP_PASSWORD')}"  
 5. click_element: login/submit button
 6. browser_snapshot (verify login success)
@@ -156,7 +156,7 @@ PERSISTENCE STRATEGY:
 - Wait for elements to load if needed
 - Report specific errors with context"""
 
-    return await execute_phase(manager, client, test_prompt, system_msg, max_iterations=20, phase_name="TEST")
+    return await execute_phase(manager, client, test_prompt, system_msg, max_iterations=25, phase_name="TEST")
 
 async def execute_phase(manager, client, prompt, system_msg, max_iterations, phase_name):
     """Execute a specific phase with proper error handling"""

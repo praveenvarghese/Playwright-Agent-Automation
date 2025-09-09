@@ -65,16 +65,16 @@ async def generate_complete_test(test_case_id: str, output_dir: str = "complete_
     print("✅ MCP automation completed with verification data")
         
     # Step 3: Run 6-step POM/Test generation workflow with validation
-    print("⚙️ Running enhanced 6-step generation workflow with validation...")
-    success = await run_workflow(test_case_id, test_case, output_dir)
+    # print("⚙️ Running enhanced 6-step generation workflow with validation...")
+    # success = await run_workflow(test_case_id, test_case, output_dir)
     
-    if success:
-        print(f"🎉 Complete test generation successful with validation!")
-        print(f"📁 Files saved in {output_dir}")
-    else:
-        print("❌ Workflow failed")
+    # if success:
+    #     print(f"🎉 Complete test generation successful with validation!")
+    #     print(f"📁 Files saved in {output_dir}")
+    # else:
+    #     print("❌ Workflow failed")
     
-    return success
+    # return success
 
 async def run_workflow(test_case_id, test_case, output_dir):
     """Run the enhanced 6-step generation workflow (UPDATED: cleaned up)"""

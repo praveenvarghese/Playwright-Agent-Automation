@@ -27,7 +27,7 @@ class TestConfig:
         """Get optimized login configuration"""
         return {
             "url": os.getenv('APP_URL'),
-            "username": os.getenv('APP_EMAIL'),
+            "email": os.getenv('APP_EMAIL'),
             "password": os.getenv('APP_PASSWORD'),
             "login_timeout": 30,  # seconds
             "post_login_wait": 2   # seconds to wait after login
@@ -106,8 +106,8 @@ class TestStepParser:
             },
             {
                 'tool': 'type_text',
-                'args': {'element': 'username', 'text': login_config['username']},
-                'description': 'Enter username'
+                'args': {'element': 'username', 'text': login_config['email']},
+                'description': 'Enter Email'
             },
             {
                 'tool': 'type_text', 

@@ -77,7 +77,7 @@ AZURE_OPENAI_API_VERSION=2024-02-15-preview
 
 # Required: Your Application
 APP_URL=https://your-app.com
-APP_USERNAME=test_user
+APP_EMAIL=test_email
 APP_PASSWORD=test_password
 
 # Simple file-based tests (easiest to start)
