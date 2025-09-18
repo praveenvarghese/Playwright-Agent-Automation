@@ -185,8 +185,10 @@ Continue until all test steps are completed or you encounter an error."""
                         "is_verification": tool_name == "browser_snapshot"
                     }
 
-                    # Only include result for non-snapshot tools to save tokens
-                    if tool_name != "browser_snapshot":
+                    # NEW: Include result ONLY for verification snapshots
+                    if tool_name == "browser_snapshot":
+                        log_entry["result"] = result.get("result", {})
+                    elif tool_name != "browser_snapshot":
                         log_entry["result"] = result.get("result", {})
 
                     execution_log.append(log_entry)
