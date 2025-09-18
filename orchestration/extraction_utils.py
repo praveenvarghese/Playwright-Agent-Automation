@@ -98,12 +98,9 @@ def extract_test_script_from_specialized(response):
     return None
 
 def load_mcp_execution_log(test_case_id: str):
-    """Always load the compact MCP execution log"""
-    compact_file = "artifacts/last_run/mcp_compact.json"
-    if os.path.exists(compact_file):
-        with open(compact_file, 'r', encoding="utf-8") as f:
-            return json.load(f)
-    return []
+    """Load ONLY compact MCP log"""
+    with open("artifacts/last_run/mcp_compact.json", 'r', encoding="utf-8") as f:
+        return json.load(f)
 
 def extract_pom_methods(pom_content: str) -> Dict[str, List[str]]:
     """Extract method names from POM classes"""
