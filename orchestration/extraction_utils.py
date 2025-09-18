@@ -97,11 +97,11 @@ def extract_test_script_from_specialized(response):
     
     return None
 
-def load_mcp_execution_log(test_case_id):
-    """Load MCP execution log if it exists"""
-    mcp_file = f"{test_case_id}_mcp_execution_log.json"
-    if os.path.exists(mcp_file):
-        with open(mcp_file, 'r') as f:
+def load_mcp_execution_log(test_case_id: str):
+    """Always load the compact MCP execution log"""
+    compact_file = "artifacts/last_run/mcp_compact.json"
+    if os.path.exists(compact_file):
+        with open(compact_file, 'r', encoding="utf-8") as f:
             return json.load(f)
     return []
 

@@ -11,6 +11,8 @@ import re
 import warnings
 from typing import TypedDict, List
 from dotenv import load_dotenv
+import json
+
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=ResourceWarning)
@@ -31,6 +33,7 @@ from orchestration.workflow_builder import create_pom_test_workflow
 from orchestration.extraction_utils import extract_page_objects_from_specialized, extract_test_script_from_specialized
 from common.validation_helpers import setup_environment, check_dependencies
 from common.file_utils import save_page_objects, save_test_script
+from common.mcp_pack import build_simple_pack
 
 # =============================================================================
 # MAIN EXECUTION FUNCTIONS
@@ -57,16 +60,46 @@ async def generate_complete_test(test_case_id: str, output_dir: str = "complete_
         print(f"📋 Found {len(structured_steps)} total steps, {len(steps_with_expected)} with expected results")
     
     # Step 2: Run MCP automation with conditional verification
+    messages = [
+    {
+        "role": "system",
+        "content": "You are an AI that generates Playwright tests from MCP compact context and test cases."
+    },
+    {
+        "role": "user",
+        "content": f"Test Case:\n{test_case}"
+    }
+]
     print("🎭 Running MCP automation with conditional verification...")
     execution_log = await run_mcp_automation(test_case_id, test_case)
     if not execution_log:
         print("❌ MCP automation failed")
         return False
     print("✅ MCP automation completed with verification data")
+
+    raw_file = f"{test_case_id}_mcp_execution_log.json"
+    if not os.path.exists(raw_file):
+        print(f"❌ Raw MCP log not found: {raw_file}")
+        return False
+
+    with open(raw_file, encoding="utf-8") as f:
+        mcp_log = json.load(f)
+
+    pack = build_simple_pack(mcp_log)
+
+    # Save compact JSON for later inspection
+    with open("artifacts/last_run/mcp_compact.json", "w", encoding="utf-8") as f:
+        json.dump(pack, f, ensure_ascii=False, indent=2)
+
+    # Add compact JSON to messages for the LLM
+    messages.append({
+        "role": "user",
+        "content": "MCP compact context:\n" + json.dumps(pack, ensure_ascii=False)
+    })
         
     # Step 3: Run 6-step POM/Test generation workflow with validation
     print("⚙️ Running enhanced 6-step generation workflow with validation...")
-    success = await run_workflow(test_case_id, test_case, output_dir)
+    success = await run_workflow(test_case_id, test_case, output_dir, messages)
     
     if success:
         print(f"🎉 Complete test generation successful with validation!")
@@ -76,7 +109,7 @@ async def generate_complete_test(test_case_id: str, output_dir: str = "complete_
     
     return success
 
-async def run_workflow(test_case_id, test_case, output_dir):
+async def run_workflow(test_case_id, test_case, output_dir,messages):
     """Run the enhanced 6-step generation workflow (UPDATED: cleaned up)"""
     
     try:
@@ -85,7 +118,7 @@ async def run_workflow(test_case_id, test_case, output_dir):
         initial_state = {
             "test_case_id": test_case_id,
             "test_case": test_case,
-            "messages": [],
+            "messages": messages,
             "page_objects": [],
             "test_file": ""
         }
