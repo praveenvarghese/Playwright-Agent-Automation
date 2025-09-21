@@ -1,5 +1,5 @@
 """
-Optimized MCP automation execution with structured login and better error handling
+Optimized MCP automation execution with structured login, test, and logout phases
 """
 
 import json
@@ -8,7 +8,7 @@ from openai import AzureOpenAI
 from mcp_helpers.mcp_manager import WorkingMCPManager
 
 async def run_mcp_automation(test_case_id, test_case):
-    """Run MCP automation using optimized approach"""
+    """Run MCP automation using optimized approach with 3 phases"""
     manager = WorkingMCPManager()
     execution_log = []
     
@@ -32,7 +32,7 @@ async def run_mcp_automation(test_case_id, test_case):
         await manager.cleanup()
 
 async def execute_optimized_test(manager, test_case_id, test_case):
-    """Execute test with optimized login and structured execution"""
+    """Execute test with optimized login, test, and logout phases"""
     client = AzureOpenAI(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
@@ -50,6 +50,11 @@ async def execute_optimized_test(manager, test_case_id, test_case):
     print("🧪 Phase 2: Test Execution")
     test_log = await execute_test_phase(manager, client, test_case)
     execution_log.extend(test_log)
+    
+    # Phase 3: Logout
+    print("🚪 Phase 3: Logout")
+    logout_log = await execute_logout_phase(manager, client)
+    execution_log.extend(logout_log)
     
     return execution_log
 
@@ -158,6 +163,24 @@ PERSISTENCE STRATEGY:
 
     return await execute_phase(manager, client, test_prompt, system_msg, max_iterations=25, phase_name="TEST")
 
+async def execute_logout_phase(manager, client):
+    """Logout phase with explicit targeting of 'Log out'"""
+    
+    logout_prompt = """
+        1. Click the user icon (circle with person) in the top right.
+        2. The dropdown will appear and stay open.
+        3. Locate the "Log out" option in the dropdown.
+        4. Click "Log out" to complete logout.
+        Done.
+        """
+
+    system_msg = """Click user icon → dropdown appears → locate and click "Log out". Use ref ID only. 
+                    Dropdown stays open—no need to re-click. Focus on visible "Log out" text.
+
+                 """
+
+    return await execute_phase(manager, client, logout_prompt, system_msg, max_iterations=8, phase_name="LOGOUT")
+
 async def execute_phase(manager, client, prompt, system_msg, max_iterations, phase_name):
     """Execute a specific phase with proper error handling"""
     
@@ -229,10 +252,13 @@ async def execute_phase(manager, client, prompt, system_msg, max_iterations, pha
                         "iteration": iteration,
                         "tool": tool_name,
                         "args": args,
-                        "result": result.get("result", {}),
                         "success": "error" not in result,
                         "timestamp": iteration
                     }
+                    # Only include result for non-snapshot tools
+                    if tool_name != "browser_snapshot":
+                        log_entry["result"] = result.get("result", {})
+ 
                     phase_log.append(log_entry)
 
                     # Add tool result to conversation
@@ -249,24 +275,21 @@ async def execute_phase(manager, client, prompt, system_msg, max_iterations, pha
                 # AI has finished this phase
                 print(f"🎯 {phase_name} phase completed: {message.content}")
                 
-                # Check if this is actual completion or premature exit
+                # Check completion with minimal overhead
                 if phase_name == "LOGIN" and "login" in message.content.lower():
-                    print("✅ Login phase completed successfully")
                     break
-                elif phase_name == "TEST" and any(word in message.content.lower() for word in ["completed", "finished", "done", "success"]):
-                    print("✅ Test phase completed successfully")
+                elif phase_name == "TEST" and any(word in message.content.lower() for word in ["completed", "done", "all steps"]):
+                    break  
+                elif phase_name == "LOGOUT" and "logout" in message.content.lower():
                     break
+                elif iteration < max_iterations - 1:
+                    conversation_history.append({
+                        "role": "user",
+                        "content": "Continue."
+                    })
+                    continue
                 else:
-                    # Encourage continuation if it seems incomplete
-                    if iteration < max_iterations - 2:  # Don't add if near limit
-                        conversation_history.append({
-                            "role": "user",
-                            "content": "Continue with the next step if there are more actions to perform."
-                        })
-                        continue
-                    else:
-                        print("⚠️ Reached iteration limit")
-                        break
+                    break
 
         except Exception as e:
             print(f"❌ Error in {phase_name} iteration {iteration}: {e}")
@@ -283,7 +306,7 @@ async def execute_phase(manager, client, prompt, system_msg, max_iterations, pha
             
             # If too many consecutive errors, try to recover
             if consecutive_errors >= max_consecutive_errors:
-                print(f"🔄 Too many consecutive errors, attempting recovery...")
+                print(f"🔥 Too many consecutive errors, attempting recovery...")
                 conversation_history.append({
                     "role": "user", 
                     "content": "There have been errors. Please take a browser_snapshot to see the current state and continue from there."
