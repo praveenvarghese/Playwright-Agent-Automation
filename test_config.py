@@ -1,10 +1,17 @@
 """
 Test configuration and setup utilities
+TOKEN OPTIMIZATION APPLIED - Production Ready
 """
 
 import os
 import json
+import hashlib
+import time
 from typing import Dict, List, Any
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class TestConfig:
     """Test configuration management"""
@@ -17,6 +24,7 @@ class TestConfig:
             "viewport": {"width": 1920, "height": 1080},
             "ignore_https_errors": True,
             "permissions": ["notifications"],
+            "record_video_size": {"width": 640, "height": 480},  # Smaller videos for token efficiency
             "extra_http_headers": {
                 "Accept-Language": "en-US,en;q=0.9"
             }   
@@ -30,7 +38,8 @@ class TestConfig:
             "email": os.getenv('APP_EMAIL'),
             "password": os.getenv('APP_PASSWORD'),
             "login_timeout": 30,  # seconds
-            "post_login_wait": 2   # seconds to wait after login
+            "post_login_wait": 2,   # seconds to wait after login
+            "token_budget": 30000   # tokens allocated for login phase
         }
     
     @staticmethod
@@ -48,6 +57,22 @@ class TestConfig:
             raise ValueError(f"Missing environment variables: {', '.join(missing_vars)}")
         
         return True
+    
+    @staticmethod
+    def get_chunking_config():
+        """Get chunking configuration for large tests"""
+        return {
+            "max_chunk_size": int(os.getenv('MCP_CHUNK_SIZE', '20')),
+            "max_tokens_per_chunk": int(os.getenv('MCP_MAX_TOKENS', '25000')),
+            "enable_checkpointing": os.getenv('MCP_CHECKPOINTING', 'true').lower() == 'true',
+            "external_log_retention_days": int(os.getenv('LOG_RETENTION_DAYS', '7'))
+        }
+    
+    @staticmethod
+    def create_execution_signature(test_case_id, steps_hash):
+        """Create execution signature for verification"""
+        signature_data = f"{test_case_id}_{steps_hash}_{int(time.time() / 3600)}"  # Hour-based
+        return hashlib.sha256(signature_data.encode()).hexdigest()[:16]
 
 class TestStepParser:
     """Parse and optimize test steps"""
@@ -68,6 +93,11 @@ class TestStepParser:
     @staticmethod
     def convert_basic_to_structured(steps_text: str) -> List[Dict]:
         """Convert basic step text to structured format"""
+        
+        # Quick validation for token efficiency
+        if len(steps_text) > 10000:  # ~2500 tokens
+            print("⚠️  Very large step description detected, may need manual chunking")
+        
         structured_steps = []
         
         # Simple parsing - split by lines and create basic structure
@@ -83,6 +113,7 @@ class TestStepParser:
             structured_steps.append({
                 'step': i,
                 'action': action,
+                'action_hash': hashlib.md5(action.encode()).hexdigest()[:8],  # For duplicate detection
                 'expected': None  # Will be filled if we can parse expectations
             })
         
@@ -135,7 +166,9 @@ class ExecutionMonitor:
             'successful_tools': 0,
             'failed_tools': 0,
             'login_attempts': 0,
-            'phases_completed': []
+            'phases_completed': [],
+            'token_usage': 0,
+            'optimization_enabled': True
         }
     
     def log_iteration(self, phase: str, iteration: int, success: bool = True):
@@ -146,6 +179,10 @@ class ExecutionMonitor:
             self.execution_stats['successful_tools'] += 1
         else:
             self.execution_stats['failed_tools'] += 1
+    
+    def log_token_usage(self, estimated_tokens: int):
+        """Log token usage for monitoring"""
+        self.execution_stats['token_usage'] = estimated_tokens
     
     def log_phase_completion(self, phase: str, success: bool = True):
         """Log phase completion"""
@@ -166,7 +203,8 @@ class ExecutionMonitor:
             'total_iterations': self.execution_stats['total_iterations'],
             'success_rate': f"{success_rate:.1f}%",
             'phases_completed': len(self.execution_stats['phases_completed']),
-            'login_efficiency': self.execution_stats.get('login_iterations', 0)
+            'login_efficiency': self.execution_stats.get('login_iterations', 0),
+            'token_efficiency': f"{self.execution_stats.get('token_usage', 0)} tokens used"
         }
     
     def detect_stuck_execution(self, recent_logs: List[Dict]) -> bool:
