@@ -1,0 +1,61 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Test Case 22",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/runners/mcp_test_generator_simple.py",
+      "args": ["22"],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Debug Test Case 22 with Custom Output",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/runners/mcp_test_generator_simple.py",
+      "args": ["22", "debug_output"],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Debug MCP Automation Only",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/mcp_helpers/automation_runner.py",
+      "args": [],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Debug Agent Config",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/agents/agent_config.py",
+      "args": [],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Debug Azure DevOps Client",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/common/azure_devops_client.py",
+      "args": [],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

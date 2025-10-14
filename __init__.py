@@ -1,0 +1,1 @@
+# Simplified MCP Playwright package
